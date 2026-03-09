@@ -1,0 +1,7 @@
+package-as: LoxxInterruptTracker
+manual-changelog: CURSE_CHANGELOG.txt
+ignore:
+  - .gitignore
+  - pkgmeta.yaml
+  - CURSE_CHANGELOG.txt
+  - RELEASE.md
