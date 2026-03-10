@@ -15,7 +15,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.2.4.1"
+local LOXX_VERSION = "1.2.4.2"
 local LOXX_DB_VERSION = 4   -- bump when SavedVars schema changes
 
 ------------------------------------------------------------
@@ -1277,6 +1277,15 @@ local function UpdateDisplay()
 
     local numVisible = barIdx - 1
 
+    -- Afficher "No kick available" quand la fenêtre est vide (healer, etc.)
+    if mainFrame.noKickLabel then
+        if numVisible == 0 then
+            mainFrame.noKickLabel:Show()
+        else
+            mainFrame.noKickLabel:Hide()
+        end
+    end
+
     -- ── Ligne "prochaine dispo globale" — toujours visible ───────────────
     local alertH = 0
     if mainFrame.alertBand then
@@ -2299,6 +2308,18 @@ local function CreateUI()
     alertLabel:SetText("")
     alertBand.label = alertLabel
     mainFrame.alertBand = alertBand
+
+    -- "No kick available" quand la fenêtre est vide (ex: healer sans interrupt)
+    local noKickLabel = mainFrame:CreateFontString(nil, "OVERLAY")
+    noKickLabel:SetFont(FONT_FACE, 12, FONT_FLAGS)
+    noKickLabel:SetPoint("TOP", mainFrame, "TOP", 0, -50)
+    noKickLabel:SetPoint("LEFT", mainFrame, "LEFT", 8, 0)
+    noKickLabel:SetPoint("RIGHT", mainFrame, "RIGHT", -8, 0)
+    noKickLabel:SetJustifyH("CENTER")
+    noKickLabel:SetJustifyV("MIDDLE")
+    noKickLabel:SetText("|cFF888888No kick available|r")
+    noKickLabel:Hide()
+    mainFrame.noKickLabel = noKickLabel
 
     mainFrame:Show()
     -- Seed saved position on first install (before player ever drags)
