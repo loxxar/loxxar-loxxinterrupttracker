@@ -4,6 +4,9 @@
 ]]
 
 LOXX_CHANGELOG = [[
+|cFFFFD100v1.2.4.3|r
+• Kick Rotation: section maintenance – removed gray bar, "Under Maintenance" label
+
 |cFFFFD100v1.2.4|r
 • Save Position button to save the interrupt window location
 • Kick Rotation: manage order, sync with party, visual highlight (yellow border) on current player's turn

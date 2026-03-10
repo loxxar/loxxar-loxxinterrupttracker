@@ -15,7 +15,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.2.4.2"
+local LOXX_VERSION = "1.2.4.3"
 local LOXX_DB_VERSION = 4   -- bump when SavedVars schema changes
 
 ------------------------------------------------------------
@@ -2147,17 +2147,9 @@ local function CreateConfigPanel()
         rotBg:SetAllPoints()
         rotBg:SetTexture(FLAT_TEX)
         rotBg:SetVertexColor(0.2, 0.2, 0.2, 0.75)
-        -- Barre horizontale "en travers"
-        local rotBar = rotOverlay:CreateTexture(nil, "OVERLAY")
-        rotBar:SetTexture(FLAT_TEX)
-        rotBar:SetVertexColor(0.6, 0.6, 0.6, 0.95)
-        rotBar:SetPoint("LEFT", rotOverlay, "LEFT", 0, 0)
-        rotBar:SetPoint("RIGHT", rotOverlay, "RIGHT", 0, 0)
-        rotBar:SetPoint("CENTER", rotOverlay, "CENTER", 0, 0)
-        rotBar:SetHeight(2)
         local rotTxt = rotOverlay:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         rotTxt:SetPoint("TOP", mgrBtn, "BOTTOM", 0, -4)
-        rotTxt:SetText("|cFF888888maintenance|r")
+        rotTxt:SetText("|cFF888888Under Maintenance|r")
     end
 
     -- ── FOOTER ───────────────────────────────────────────────────
