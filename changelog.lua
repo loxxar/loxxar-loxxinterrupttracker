@@ -4,6 +4,11 @@
 ]]
 
 LOXX_CHANGELOG = [[
+|cFFFFD100v1.2.4.7|r
+• Config: footer band protégé en bas (message + version)
+• Config: boutons Run Stats / Save Position / Changelog repositionnés
+• Config: séparateur abaissé (espace avec Ready Size)
+
 |cFFFFD100v1.2.4.6|r
 • Config window: increased height for full footer visibility
 

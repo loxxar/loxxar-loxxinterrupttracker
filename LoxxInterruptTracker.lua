@@ -1,5 +1,5 @@
 --[[
-    Loxx Interrupt Tracker v1.2.4.6 - Midnight 12.0.x
+    Loxx Interrupt Tracker v1.2.4.7 - Midnight 12.0.x
 
     Maintained by Loxxar.
 
@@ -15,7 +15,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.2.4.6"
+local LOXX_VERSION = "1.2.4.7"
 local LOXX_DB_VERSION = 4   -- bump when SavedVars schema changes
 
 ------------------------------------------------------------
@@ -2160,13 +2160,13 @@ local function CreateConfigPanel()
         local rule = configFrame:CreateTexture(nil, "ARTWORK")
         rule:SetTexture(FLAT_TEX)
         rule:SetVertexColor(0.45, 0.38, 0.22, 0.4)
-        rule:SetPoint("TOPLEFT",  8, -486)
-        rule:SetPoint("TOPRIGHT", -8, -486)
+        rule:SetPoint("TOPLEFT",  8, -538)
+        rule:SetPoint("TOPRIGHT", -8, -538)
         rule:SetHeight(1)
     end
     local changelogBtn = CreateFrame("Button", nil, configFrame, "UIPanelButtonTemplate")
     changelogBtn:SetSize(90, 24)
-    changelogBtn:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -14, 44)
+    changelogBtn:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -14, 120)
     changelogBtn:SetText("Changelog")
     changelogBtn:SetScript("OnClick", function() ShowChangelogWindow() end)
 
@@ -2212,12 +2212,27 @@ local function CreateConfigPanel()
     end
     statsBtn:SetScript("OnClick", function() ShowStatsWindow() end)
 
-    local footerMsg = configFrame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    footerMsg:SetPoint("BOTTOM", 0, 64)
+    -- Zone protégée en bas : message + version (collés au fond, séparés du reste)
+    local footerBand = CreateFrame("Frame", nil, configFrame)
+    footerBand:SetHeight(52)
+    footerBand:SetPoint("BOTTOMLEFT", configFrame, "BOTTOMLEFT", 0, 0)
+    footerBand:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", 0, 0)
+    footerBand:SetFrameLevel(configFrame:GetFrameLevel() + 2)
+    local footerBg = footerBand:CreateTexture(nil, "BACKGROUND")
+    footerBg:SetAllPoints()
+    footerBg:SetTexture(FLAT_TEX)
+    footerBg:SetVertexColor(0.06, 0.05, 0.03, 0.95)
+    local footerSep = footerBand:CreateTexture(nil, "BORDER")
+    footerSep:SetTexture(FLAT_TEX)
+    footerSep:SetVertexColor(0.45, 0.38, 0.22, 0.5)
+    footerSep:SetPoint("TOPLEFT", footerBand, "TOPLEFT", 8, 0)
+    footerSep:SetPoint("TOPRIGHT", footerBand, "TOPRIGHT", -8, 0)
+    footerSep:SetHeight(1)
+    local footerMsg = footerBand:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    footerMsg:SetPoint("BOTTOM", footerBand, "BOTTOM", 0, 14)
     footerMsg:SetText("Thanks to my favorite haters who pushed me to continue this addon  #FUALL")
-
-    local footerVer = configFrame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    footerVer:SetPoint("BOTTOM", 0, 28)
+    local footerVer = footerBand:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    footerVer:SetPoint("BOTTOM", footerBand, "BOTTOM", 0, 4)
     footerVer:SetText("|cFF888888v" .. LOXX_VERSION .. "|r")
 
     configFrame:Show()
