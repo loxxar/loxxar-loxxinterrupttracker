@@ -96,6 +96,7 @@ local DEFAULTS = {
     showTooltip     = true,
     hideOutOfCombat = false,
     rotationEnabled = false,
+    showKicksReadyBar = true,
 }
 
 ------------------------------------------------------------
@@ -1286,10 +1287,10 @@ local function UpdateDisplay()
         end
     end
 
-    -- ── Ligne "prochaine dispo globale" — toujours visible ───────────────
+    -- ── Ligne "prochaine dispo globale" — optionnelle ─────────────────────
     local alertH = 0
     if mainFrame.alertBand then
-        if numVisible == 0 then
+        if numVisible == 0 or db.showKicksReadyBar == false then
             mainFrame.alertBand:Hide()
         else
             alertH = 22
@@ -1953,6 +1954,8 @@ local function CreateConfigPanel()
     yL = yL - 28
     CreateCheckbox(configFrame, "Lock Position", L_CBX1, yL, "locked")
     CreateCheckbox(configFrame, "Show READY", L_CBX2, yL, "showReady")
+    yL = yL - 28
+    CreateCheckbox(configFrame, "Show 'X kicks ready' bar", L_CBX1, yL, "showKicksReadyBar", UpdateDisplay)
     yL = yL - 28
     do
         local cb = CreateFrame("CheckButton", nil, configFrame, "UICheckButtonTemplate")
@@ -2822,6 +2825,7 @@ local function RegisterBlizzardOptions()
         cb:SetScript("OnClick", function(self)
             db[dbKey] = self:GetChecked()
             if dbKey == "showTitle" or dbKey == "showReady" then RebuildBars() end
+            if dbKey == "showKicksReadyBar" then UpdateDisplay() end
             if dbKey:find("^show") or dbKey == "hideOutOfCombat" then CheckZoneVisibility() end
         end)
     end
@@ -2854,9 +2858,10 @@ local function RegisterBlizzardOptions()
     local yL = -66
 
     BH("DISPLAY", LX, yL) ; yL = yL - 22
-    BC("Show Title Bar",   "showTitle",  LX, yL) ; yL = yL - 24
-    BC("Lock Position",    "locked",     LX, yL) ; yL = yL - 24
-    BC("Show READY Text",  "showReady",  LX, yL) ; yL = yL - 24
+    BC("Show Title Bar",       "showTitle",        LX, yL) ; yL = yL - 24
+    BC("Lock Position",        "locked",           LX, yL) ; yL = yL - 24
+    BC("Show READY Text",      "showReady",        LX, yL) ; yL = yL - 24
+    BC("Show 'X kicks ready' bar", "showKicksReadyBar", LX, yL) ; yL = yL - 24
     BC("Tooltip on Hover", "showTooltip",LX, yL) ; yL = yL - 24
     BC("Hide out of combat","hideOutOfCombat", LX, yL) ; yL = yL - 36
 
