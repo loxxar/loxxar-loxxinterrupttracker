@@ -15,7 +15,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.2.4.7"
+local LOXX_VERSION = "1.2.4.8"
 local LOXX_DB_VERSION = 4   -- bump when SavedVars schema changes
 
 ------------------------------------------------------------
@@ -1754,7 +1754,7 @@ local function ShowChangelogWindow()
     hdr:SetVertexColor(0.12, 0.09, 0.02, 1)
     hdr:SetPoint("TOPLEFT",  0, -22)
     hdr:SetPoint("TOPRIGHT", 0, -22)
-    hdr:SetHeight(52)
+    hdr:SetHeight(64)
     local hdrLineTop = changelogFrame:CreateTexture(nil, "BORDER")
     hdrLineTop:SetTexture(FLAT_TEX)
     hdrLineTop:SetVertexColor(0.87, 0.73, 0.37, 0.75)
@@ -1764,14 +1764,14 @@ local function ShowChangelogWindow()
     local hdrLineBot = changelogFrame:CreateTexture(nil, "BORDER")
     hdrLineBot:SetTexture(FLAT_TEX)
     hdrLineBot:SetVertexColor(0.87, 0.73, 0.37, 0.75)
-    hdrLineBot:SetPoint("TOPLEFT",  0, -74)
-    hdrLineBot:SetPoint("TOPRIGHT", 0, -74)
+    hdrLineBot:SetPoint("TOPLEFT",  0, -86)
+    hdrLineBot:SetPoint("TOPRIGHT", 0, -86)
     hdrLineBot:SetHeight(1)
     local hdrTitle = changelogFrame:CreateFontString(nil, "OVERLAY")
     hdrTitle:SetFont(FONT_FACE, 22, FONT_FLAGS)
     hdrTitle:SetShadowOffset(2, -2)
     hdrTitle:SetShadowColor(0, 0, 0, 1)
-    hdrTitle:SetPoint("TOP", 0, -34)
+    hdrTitle:SetPoint("TOP", 0, -40)
     hdrTitle:SetJustifyH("CENTER")
     hdrTitle:SetText("|cFFFFD100Changelog|r")
 
@@ -1809,9 +1809,10 @@ local function CreateConfigPanel()
         return
     end
 
-    local PW, PH = 600, 660
-    local MID = 300
-    local SL_W = 210
+    local PW, PH = 720, 720
+    local MID = PW * 0.5
+    local SL_W = 260
+    local PADDING = 24
 
     configFrame = CreateFrame("Frame", "LoxxConfigFrame", UIParent, "BasicFrameTemplate")
     configFrame:SetSize(PW, PH)
@@ -1841,27 +1842,39 @@ local function CreateConfigPanel()
     local hdrLineBot = configFrame:CreateTexture(nil, "BORDER")
     hdrLineBot:SetTexture(FLAT_TEX)
     hdrLineBot:SetVertexColor(0.87, 0.73, 0.37, 0.75)
-    hdrLineBot:SetPoint("TOPLEFT",  0, -74)
-    hdrLineBot:SetPoint("TOPRIGHT", 0, -74)
+    hdrLineBot:SetPoint("TOPLEFT",  0, -86)
+    hdrLineBot:SetPoint("TOPRIGHT", 0, -86)
     hdrLineBot:SetHeight(1)
     local hdrTitle = configFrame:CreateFontString(nil, "OVERLAY")
     hdrTitle:SetFont(FONT_FACE, 28, FONT_FLAGS)
     hdrTitle:SetShadowOffset(2, -2)
     hdrTitle:SetShadowColor(0, 0, 0, 1)
-    hdrTitle:SetPoint("TOP", 0, -34)
+    hdrTitle:SetPoint("TOP", 0, -40)
     hdrTitle:SetJustifyH("CENTER")
     hdrTitle:SetText("|cFFFFD100Loxx Interrupt Tracker|r")
 
     -- Vertical divider (decorative only)
+    local columnBgLeft = configFrame:CreateTexture(nil, "BACKGROUND", nil, -2)
+    columnBgLeft:SetTexture(FLAT_TEX)
+    columnBgLeft:SetVertexColor(0.08, 0.07, 0.05, 0.85)
+    columnBgLeft:SetPoint("TOPLEFT", PADDING, -90)
+    columnBgLeft:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMLEFT", MID - 12, 64)
+
+    local columnBgRight = configFrame:CreateTexture(nil, "BACKGROUND", nil, -2)
+    columnBgRight:SetTexture(FLAT_TEX)
+    columnBgRight:SetVertexColor(0.08, 0.07, 0.05, 0.85)
+    columnBgRight:SetPoint("TOPLEFT", configFrame, "TOPLEFT", MID + 12, -90)
+    columnBgRight:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -PADDING, 64)
+
     local div = configFrame:CreateTexture(nil, "ARTWORK")
     div:SetTexture(FLAT_TEX)
-    div:SetVertexColor(0.45, 0.38, 0.22, 0.5)
-    div:SetPoint("TOPLEFT",    configFrame, "TOPLEFT", MID,     -76)
-    div:SetPoint("BOTTOMLEFT", configFrame, "BOTTOMLEFT", MID, 44)
-    div:SetWidth(2)
+    div:SetVertexColor(0.45, 0.38, 0.22, 0.35)
+    div:SetPoint("TOPLEFT",    configFrame, "TOPLEFT", MID,     -86)
+    div:SetPoint("BOTTOMLEFT", configFrame, "BOTTOMLEFT", MID, 52)
+    div:SetWidth(1)
 
-    local L_X1, L_CBX1, L_CBX2, SL_XL = 14, 20, 152, 52
-    local R_X1, R_CBX1, R_CBX2 = 314, 314, 446
+    local L_X1, L_CBX1, L_CBX2, SL_XL = PADDING + 4, PADDING + 10, PADDING + 172, PADDING + 40
+    local R_X1, R_CBX1, R_CBX2 = MID + 20, MID + 30, MID + 192
 
     local function SectionLabelL(text, yOff)
         local lbl = configFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -1871,7 +1884,7 @@ local function CreateConfigPanel()
         rule:SetTexture(FLAT_TEX)
         rule:SetVertexColor(0.87, 0.73, 0.37, 0.35)
         rule:SetPoint("LEFT", lbl, "RIGHT", 6, 0)
-        rule:SetPoint("RIGHT", configFrame, "LEFT", MID - 10, 0)
+        rule:SetPoint("RIGHT", configFrame, "LEFT", MID - 18, 0)
         rule:SetHeight(1)
     end
     local function SectionLabelR(text, yOff)
@@ -1882,18 +1895,18 @@ local function CreateConfigPanel()
         rule:SetTexture(FLAT_TEX)
         rule:SetVertexColor(0.87, 0.73, 0.37, 0.35)
         rule:SetPoint("LEFT", lbl, "RIGHT", 6, 0)
-        rule:SetPoint("RIGHT", configFrame, "RIGHT", -14, 0)
+        rule:SetPoint("RIGHT", configFrame, "RIGHT", -PADDING, 0)
         rule:SetHeight(1)
     end
 
     -- ── LEFT COLUMN ─────────────────────────────────────────────
-    local yL = -82
+    local yL = -102
     SectionLabelL("DISPLAY", yL)
-    yL = yL - 22
+    yL = yL - 32
 
     local alphaSlider = MakeSlider("LOXX_Slider_alpha", configFrame)
     alphaSlider:SetPoint("TOPLEFT", SL_XL, yL)
-    alphaSlider:SetSize(SL_W, 26)
+    alphaSlider:SetSize(SL_W, 28)
     alphaSlider:SetMinMaxValues(0.3, 1.0)
     alphaSlider:SetValueStep(0.05)
     alphaSlider:SetObeyStepOnDrag(true)
@@ -1908,11 +1921,11 @@ local function CreateConfigPanel()
         if mainFrame then mainFrame:SetAlpha(value) end
     end)
 
-    yL = yL - 48
+    yL = yL - 56
     local initW = db.frameWidth or 180
     local widthSlider = MakeSlider("LOXX_Slider_width", configFrame)
     widthSlider:SetPoint("TOPLEFT", SL_XL, yL)
-    widthSlider:SetSize(SL_W, 26)
+    widthSlider:SetSize(SL_W, 28)
     widthSlider:SetMinMaxValues(120, 400)
     widthSlider:SetValueStep(10)
     widthSlider:SetObeyStepOnDrag(true)
@@ -1927,11 +1940,11 @@ local function CreateConfigPanel()
         RebuildBars()
     end)
 
-    yL = yL - 48
+    yL = yL - 56
     local initH = db.barHeight or 20
     local heightSlider = MakeSlider("LOXX_Slider_height", configFrame)
     heightSlider:SetPoint("TOPLEFT", SL_XL, yL)
-    heightSlider:SetSize(SL_W, 26)
+    heightSlider:SetSize(SL_W, 28)
     heightSlider:SetMinMaxValues(14, 50)
     heightSlider:SetValueStep(1)
     heightSlider:SetObeyStepOnDrag(true)
@@ -1949,9 +1962,9 @@ local function CreateConfigPanel()
     -- OPTIONS
     yL = yL - 48
     SectionLabelL("OPTIONS", yL)
-    yL = yL - 24
+    yL = yL - 30
     CreateCheckbox(configFrame, "Show Title", L_CBX1, yL, "showTitle")
-    yL = yL - 28
+    yL = yL - 32
     CreateCheckbox(configFrame, "Lock Position", L_CBX1, yL, "locked")
     CreateCheckbox(configFrame, "Show READY", L_CBX2, yL, "showReady")
     yL = yL - 28
@@ -1970,13 +1983,13 @@ local function CreateConfigPanel()
     end
 
     -- FONT SIZES
-    yL = yL - 40
+    yL = yL - 48
     SectionLabelL("FONT SIZES", yL)
-    yL = yL - 22
+    yL = yL - 28
     local initNameFont = math.max(2, db.nameFontSize or 12)
     local nameSlider = MakeSlider("LOXX_Slider_nameFont", configFrame)
     nameSlider:SetPoint("TOPLEFT", SL_XL, yL)
-    nameSlider:SetSize(SL_W, 26)
+    nameSlider:SetSize(SL_W, 28)
     nameSlider:SetMinMaxValues(2, 32)
     nameSlider:SetValueStep(1)
     nameSlider:SetObeyStepOnDrag(true)
@@ -1995,7 +2008,7 @@ local function CreateConfigPanel()
     local initCdFont = math.max(2, db.readyFontSize or 12)
     local cdSlider = MakeSlider("LOXX_Slider_cdFont", configFrame)
     cdSlider:SetPoint("TOPLEFT", SL_XL, yL)
-    cdSlider:SetSize(SL_W, 26)
+    cdSlider:SetSize(SL_W, 28)
     cdSlider:SetMinMaxValues(2, 32)
     cdSlider:SetValueStep(1)
     cdSlider:SetObeyStepOnDrag(true)
@@ -2014,7 +2027,7 @@ local function CreateConfigPanel()
     local initReadyFont = math.max(2, db.readyTextSize or 12)
     local readySlider = MakeSlider("LOXX_Slider_readyFont", configFrame)
     readySlider:SetPoint("TOPLEFT", SL_XL, yL)
-    readySlider:SetSize(SL_W, 26)
+    readySlider:SetSize(SL_W, 28)
     readySlider:SetMinMaxValues(2, 32)
     readySlider:SetValueStep(1)
     readySlider:SetObeyStepOnDrag(true)
@@ -2030,9 +2043,9 @@ local function CreateConfigPanel()
     end)
 
     -- ── RIGHT COLUMN ─────────────────────────────────────────────
-    local yR = -82
+    local yR = -102
     SectionLabelR("SHOW IN", yR)
-    yR = yR - 24
+    yR = yR - 30
     local function VisCheck(parent, label, x, y, key)
         local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
         cb:SetPoint("TOPLEFT", x, y)
@@ -2047,13 +2060,13 @@ local function CreateConfigPanel()
     end
     VisCheck(configFrame, "Dungeons", R_CBX1, yR, "showInDungeon")
     VisCheck(configFrame, "Arena", R_CBX2, yR, "showInArena")
-    yR = yR - 28
+    yR = yR - 32
     VisCheck(configFrame, "Open World", R_CBX1, yR, "showInOpenWorld")
 
     -- SOUND
-    yR = yR - 40
+    yR = yR - 48
     SectionLabelR("SOUND", yR)
-    yR = yR - 24
+    yR = yR - 30
     local soundOptions = { { name = "None", id = nil } }
     for _, s in ipairs(SOUND_LIST) do soundOptions[#soundOptions+1] = s end
     local function getSoundOptIdx()
@@ -2065,13 +2078,13 @@ local function CreateConfigPanel()
     end
 
     local sndDropBtn = CreateFrame("Button", nil, configFrame, "UIPanelButtonTemplate")
-    sndDropBtn:SetSize(140, 22)
+    sndDropBtn:SetSize(160, 24)
     sndDropBtn:SetPoint("TOPLEFT", R_CBX1, yR)
     sndDropBtn:SetText(soundOptions[getSoundOptIdx()].name .. "  v")
 
     local sndPopup = CreateFrame("Frame", nil, configFrame)
     sndPopup:SetFrameStrata("TOOLTIP")
-    sndPopup:SetSize(140, #soundOptions * 22 + 8)
+    sndPopup:SetSize(160, #soundOptions * 22 + 8)
     sndPopup:SetPoint("TOPLEFT", sndDropBtn, "BOTTOMLEFT", 0, -2)
     sndPopup:Hide()
     local popBg = sndPopup:CreateTexture(nil, "BACKGROUND")
@@ -2107,15 +2120,15 @@ local function CreateConfigPanel()
     end)
 
     -- UI
-    yR = yR - 40
+    yR = yR - 48
     SectionLabelR("UI", yR)
-    yR = yR - 24
+    yR = yR - 30
     CreateCheckbox(configFrame, "Tooltip on Hover", R_CBX1, yR, "showTooltip")
 
     -- ROTATION
-    yR = yR - 40
+    yR = yR - 52
     SectionLabelR("ROTATION", yR)
-    yR = yR - 24
+    yR = yR - 30
     local rotCb = CreateFrame("CheckButton", nil, configFrame, "UICheckButtonTemplate")
     rotCb:SetPoint("TOPLEFT", R_CBX1, yR)
     local rotLbl = rotCb.text or rotCb.Text
@@ -2127,9 +2140,9 @@ local function CreateConfigPanel()
         if LOXXSavedVars then LOXXSavedVars.rotationEnabled = db.rotationEnabled end
     end)
 
-    yR = yR - 28
+    yR = yR - 34
     local mgrBtn = CreateFrame("Button", nil, configFrame, "UIPanelButtonTemplate")
-    mgrBtn:SetSize(130, 22)
+    mgrBtn:SetSize(150, 24)
     mgrBtn:SetPoint("TOPLEFT", R_CBX1, yR)
     mgrBtn:SetText("Manage Kick Rotation")
     mgrBtn:SetScript("OnClick", function()
@@ -2143,8 +2156,8 @@ local function CreateConfigPanel()
         mgrBtn:Disable()
         local rotOverlay = CreateFrame("Frame", nil, configFrame)
         rotOverlay:SetFrameLevel(rotCb:GetFrameLevel() + 20)
-        rotOverlay:SetPoint("TOPLEFT", rotCb, "TOPLEFT", -5, 5)
-        rotOverlay:SetPoint("BOTTOMRIGHT", mgrBtn, "BOTTOMRIGHT", 140, -24)
+        rotOverlay:SetPoint("TOPLEFT", rotCb, "TOPLEFT", -6, 6)
+        rotOverlay:SetPoint("BOTTOMRIGHT", mgrBtn, "BOTTOMRIGHT", 150, -22)
         rotOverlay:EnableMouse(true)
         local rotBg = rotOverlay:CreateTexture(nil, "BACKGROUND")
         rotBg:SetAllPoints()
@@ -2156,23 +2169,20 @@ local function CreateConfigPanel()
     end
 
     -- ── FOOTER ───────────────────────────────────────────────────
-    do
-        local rule = configFrame:CreateTexture(nil, "ARTWORK")
-        rule:SetTexture(FLAT_TEX)
-        rule:SetVertexColor(0.45, 0.38, 0.22, 0.4)
-        rule:SetPoint("TOPLEFT",  8, -538)
-        rule:SetPoint("TOPRIGHT", -8, -538)
-        rule:SetHeight(1)
-    end
-    local changelogBtn = CreateFrame("Button", nil, configFrame, "UIPanelButtonTemplate")
-    changelogBtn:SetSize(90, 24)
-    changelogBtn:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -14, 120)
+    local buttonColumn = CreateFrame("Frame", nil, configFrame)
+    buttonColumn:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -PADDING, 72)
+    buttonColumn:SetSize(140, 90)
+    local BUTTON_SPACING = 10
+
+    local changelogBtn = CreateFrame("Button", nil, buttonColumn, "UIPanelButtonTemplate")
+    changelogBtn:SetSize(120, 24)
+    changelogBtn:SetPoint("BOTTOMRIGHT", buttonColumn, "BOTTOMRIGHT", 0, 0)
     changelogBtn:SetText("Changelog")
     changelogBtn:SetScript("OnClick", function() ShowChangelogWindow() end)
 
-    local savePosBtn = CreateFrame("Button", nil, configFrame, "UIPanelButtonTemplate")
-    savePosBtn:SetSize(100, 24)
-    savePosBtn:SetPoint("RIGHT", changelogBtn, "LEFT", -10, 0)
+    local savePosBtn = CreateFrame("Button", nil, buttonColumn, "UIPanelButtonTemplate")
+    savePosBtn:SetSize(120, 24)
+    savePosBtn:SetPoint("BOTTOMRIGHT", changelogBtn, "TOPRIGHT", 0, BUTTON_SPACING)
     savePosBtn:SetText("Save Position")
     savePosBtn:SetScript("OnClick", function()
         local function toChat(msg)
@@ -2203,9 +2213,9 @@ local function CreateConfigPanel()
     end)
 
     -- Run Stats button (gold, like other buttons)
-    local statsBtn = CreateFrame("Button", nil, configFrame, "UIPanelButtonTemplate")
-    statsBtn:SetSize(100, 24)
-    statsBtn:SetPoint("RIGHT", savePosBtn, "LEFT", -10, 0)
+    local statsBtn = CreateFrame("Button", nil, buttonColumn, "UIPanelButtonTemplate")
+    statsBtn:SetSize(120, 24)
+    statsBtn:SetPoint("BOTTOMRIGHT", savePosBtn, "TOPRIGHT", 0, BUTTON_SPACING)
     statsBtn:SetText("Run Stats")
     if statsBtn.GetFontString and statsBtn:GetFontString() then
         statsBtn:GetFontString():SetTextColor(1, 0.82, 0)  -- doré (FFFFD100)
@@ -2222,12 +2232,6 @@ local function CreateConfigPanel()
     footerBg:SetAllPoints()
     footerBg:SetTexture(FLAT_TEX)
     footerBg:SetVertexColor(0.06, 0.05, 0.03, 0.95)
-    local footerSep = footerBand:CreateTexture(nil, "BORDER")
-    footerSep:SetTexture(FLAT_TEX)
-    footerSep:SetVertexColor(0.45, 0.38, 0.22, 0.5)
-    footerSep:SetPoint("TOPLEFT", footerBand, "TOPLEFT", 8, 0)
-    footerSep:SetPoint("TOPRIGHT", footerBand, "TOPRIGHT", -8, 0)
-    footerSep:SetHeight(1)
     local footerMsg = footerBand:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     footerMsg:SetPoint("BOTTOM", footerBand, "BOTTOM", 0, 14)
     footerMsg:SetText("Thanks to my favorite haters who pushed me to continue this addon  #FUALL")

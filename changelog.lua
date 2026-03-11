@@ -4,6 +4,11 @@
 ]]
 
 LOXX_CHANGELOG = [[
+|cFFFFD100v1.2.4.8|r
+• Config: retrait des lignes dorées de bas de page
+• Config: boutons alignés verticalement en bas à droite
+• Config: footer nettoyé (plus de séparateur)
+
 |cFFFFD100v1.2.4.7|r
 • Config: footer band protégé en bas (message + version)
 • Config: boutons Run Stats / Save Position / Changelog repositionnés
