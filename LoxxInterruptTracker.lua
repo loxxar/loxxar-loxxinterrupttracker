@@ -15,7 +15,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.2.5.2"
+local LOXX_VERSION = "1.2.5.3"
 local LOXX_DB_VERSION = 4   -- bump when SavedVars schema changes
 
 ------------------------------------------------------------
@@ -76,6 +76,29 @@ local CLASS_COLORS = {
 ------------------------------------------------------------
 -- Defaults
 ------------------------------------------------------------
+local FONT_PRESETS = {
+    { label = "Default", font = nil },
+    { label = "Friz Quadrata", font = "Fonts\\FRIZQT__.TTF" },
+    { label = "Morpheus", font = "Fonts\\MORPHEUS.TTF" },
+    { label = "Skurri", font = "Fonts\\SKURRI.TTF" },
+    { label = "Arial Narrow", font = "Fonts\\ARIALN.TTF" },
+}
+
+local FONT_COLOR_PRESETS = {
+    { label = "Blanc", color = {1, 1, 1} },
+    { label = "Jaune", color = {1, 0.82, 0} },
+    { label = "Vert", color = {0.2, 1, 0.2} },
+    { label = "Bleu", color = {0.4, 0.8, 1} },
+    { label = "Rouge", color = {1, 0.4, 0.4} },
+}
+
+local BAR_TEXTURE_PRESETS = {
+    { label = "Classique", texture = "Interface\\BUTTONS\\WHITE8X8" },
+    { label = "Lisse", texture = "Interface\\TARGETINGFRAME\\UI-StatusBar" },
+    { label = "Raid", texture = "Interface\\RaidFrame\\Raid-Bar-Hp-Fill" },
+    { label = "Compétences", texture = "Interface\\PaperDollInfoFrame\\UI-Character-Skills-Bar" },
+}
+
 local DEFAULTS = {
     frameWidth      = 180,  -- fixed — no auto-scaling
     barHeight       = 20,   -- fixed — fits 12px font
@@ -95,8 +118,9 @@ local DEFAULTS = {
     hideOutOfCombat = false,
     rotationEnabled = false,
     showKicksReadyBar = true,
-    fontPath        = "",
-    barTexture      = "",
+    fontPreset      = 1,
+    fontColorPreset = 1,
+    barTexturePreset= 1,
 }
 
 ------------------------------------------------------------
@@ -106,6 +130,62 @@ local DEFAULTS = {
 ------------------------------------------------------------
 local function SK(key, fallback)
     return (SOUNDKIT and SOUNDKIT[key]) or fallback
+end
+
+local presetDropdown
+local presetButtons = {}
+local function ShowPresetDropdown(anchor, options, onSelect)
+    if not presetDropdown then
+        presetDropdown = CreateFrame("Frame", nil, UIParent)
+        presetDropdown:SetFrameStrata("TOOLTIP")
+        presetDropdown:SetBackdrop({ bgFile = FLAT_TEX, edgeFile = FLAT_TEX, edgeSize = 1 })
+        presetDropdown:SetBackdropColor(0.06, 0.06, 0.06, 0.96)
+        presetDropdown:SetBackdropBorderColor(0.3, 0.28, 0.18, 0.9)
+        presetDropdown:SetScript("OnLeave", function(self) self:Hide() end)
+        presetDropdown:SetScript("OnHide", function(self)
+            self.anchor = nil
+            self:SetParent(UIParent)
+        end)
+    end
+    if presetDropdown:IsShown() and presetDropdown.anchor == anchor then
+        presetDropdown:Hide()
+        return
+    end
+    presetDropdown.anchor = anchor
+    presetDropdown:SetParent(anchor:GetParent())
+    presetDropdown:ClearAllPoints()
+    presetDropdown:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -4)
+    local width = math.max(anchor:GetWidth() + 40, 200)
+    presetDropdown:SetWidth(width)
+    for i, opt in ipairs(options) do
+        local btn = presetButtons[i]
+        if not btn then
+            btn = CreateFrame("Button", nil, presetDropdown)
+            presetButtons[i] = btn
+            btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            btn.text:SetAllPoints()
+            btn.text:SetJustifyH("LEFT")
+        end
+        btn:SetSize(width - 8, 18)
+        btn:ClearAllPoints()
+        btn:SetPoint("TOPLEFT", 4, -4 - (i - 1) * 20)
+        btn.text:SetText("  " .. opt.label)
+        btn.text:SetTextColor(1, 1, 1)
+        btn:SetScript("OnEnter", function() btn.text:SetTextColor(1, 0.82, 0) end)
+        btn:SetScript("OnLeave", function() btn.text:SetTextColor(1, 1, 1) end)
+        btn:SetScript("OnClick", function()
+            onSelect(i)
+            presetDropdown:Hide()
+        end)
+        btn:Show()
+    end
+    for i = #options + 1, #presetButtons do
+        presetButtons[i]:Hide()
+    end
+    presetDropdown:SetHeight(#options * 20 + 8)
+    presetDropdown:SetParent(anchor:GetParent())
+    presetDropdown:SetFrameStrata("TOOLTIP")
+    presetDropdown:Show()
 end
 local SOUND_LIST = {
     { name = "Sound1", id = SK("AUCTION_WINDOW_OPEN",            3087)  },
@@ -274,6 +354,8 @@ local FONT_FACE = GameFontNormal and GameFontNormal:GetFont() or "Fonts\\FRIZQT_
 local FONT_FLAGS  = "OUTLINE"
 local BAR_TEXTURE = "Interface\\BUTTONS\\WHITE8X8"
 local FLAT_TEX    = "Interface\\BUTTONS\\WHITE8X8"
+local FONT_COLOR = {1, 1, 1}
+local FONT_READY_COLOR = {0.2, 1.0, 0.2}
 
 -- Locale-specific font fallbacks (if GameFontNormal not available at load time)
 local LOCALE_FONTS = {
@@ -305,6 +387,35 @@ end
 ------------------------------------------------------------
 -- ElvUI detection
 ------------------------------------------------------------
+local function ApplyFontPreset()
+    local preset = FONT_PRESETS[db.fontPreset or 1]
+    if preset and preset.font and preset.font ~= "" then
+        FONT_FACE = preset.font
+    else
+        FONT_FACE = GameFontNormal and GameFontNormal:GetFont() or "Fonts\\FRIZQT__.TTF"
+    end
+    local color = FONT_COLOR_PRESETS[db.fontColorPreset or 1]
+    if color then
+        FONT_COLOR = {color.color[1], color.color[2], color.color[3]}
+    else
+        FONT_COLOR = {1,1,1}
+    end
+    FONT_READY_COLOR = {
+        math.min(1, FONT_COLOR[1] * 0.7 + 0.3),
+        math.min(1, FONT_COLOR[2] * 0.7 + 0.3),
+        math.min(1, FONT_COLOR[3] * 0.7 + 0.3),
+    }
+end
+
+local function ApplyTexturePreset()
+    local preset = BAR_TEXTURE_PRESETS[db.barTexturePreset or 1]
+    if preset and preset.texture then
+        BAR_TEXTURE = preset.texture
+    else
+        BAR_TEXTURE = "Interface\\BUTTONS\\WHITE8X8"
+    end
+end
+
 local function DetectElvUI()
     -- Apply locale font fallback if needed
     local locale = GetLocale()
@@ -317,18 +428,19 @@ local function DetectElvUI()
         if gf then FONT_FACE = gf end
     end
 
-    if db and db.fontPath and db.fontPath ~= "" then
-        FONT_FACE = db.fontPath
-    elseif ElvUI then
+    if ElvUI and (not db or (db.fontPreset or 1) == 1) then
         local E = unpack(ElvUI)
         if E and E.media and E.media.normFont then FONT_FACE = E.media.normFont end
     end
 
-    if db and db.barTexture and db.barTexture ~= "" then
-        BAR_TEXTURE = db.barTexture
-    elseif ElvUI then
+    if ElvUI and (not db or (db.barTexturePreset or 1) == 1) then
         local E = unpack(ElvUI)
         if E and E.media and E.media.normTex then BAR_TEXTURE = E.media.normTex end
+    end
+
+    if db then
+        ApplyFontPreset()
+        ApplyTexturePreset()
     end
 end
 
@@ -993,6 +1105,7 @@ local function RebuildBars()
         -- Name text
         local nm = content:CreateFontString(nil, "OVERLAY")
         nm:SetFont(FONT_FACE, fontSize, FONT_FLAGS)
+        nm:SetTextColor(unpack(FONT_COLOR))
         nm:SetPoint("LEFT", 6, 0)
         nm:SetJustifyH("LEFT")
         nm:SetWidth(barW - 50)
@@ -1004,6 +1117,7 @@ local function RebuildBars()
         -- Party CD text
         local pcd = content:CreateFontString(nil, "OVERLAY")
         pcd:SetFont(FONT_FACE, cdFontSize, FONT_FLAGS)
+        pcd:SetTextColor(unpack(FONT_COLOR))
         pcd:SetPoint("RIGHT", -6, 0)
         pcd:SetShadowOffset(1, -1)
         pcd:SetShadowColor(0, 0, 0, 1)
@@ -1015,6 +1129,7 @@ local function RebuildBars()
         wrap:SetFrameLevel(content:GetFrameLevel() + 1)
         local mycd = wrap:CreateFontString(nil, "OVERLAY")
         mycd:SetFont(FONT_FACE, cdFontSize, FONT_FLAGS)
+        mycd:SetTextColor(unpack(FONT_COLOR))
         mycd:SetPoint("RIGHT", -6, 0)
         mycd:SetShadowOffset(1, -1)
         mycd:SetShadowColor(0, 0, 0, 1)
@@ -1101,7 +1216,8 @@ local function UpdateDisplay()
         bar.playerCdText:Hide()
         bar.playerCdWrapper:SetAlpha(1)
         bar.partyCdText:Show()
-        bar.nameText:SetText("|cFFFFFFFF" .. name .. "|r")
+        bar.nameText:SetText(name)
+        bar.nameText:SetTextColor(unpack(FONT_COLOR))
         bar.cdBar:SetMinMaxValues(0, baseCd)
         -- Tooltip data
         bar.ttSpellName = spellName
@@ -1111,7 +1227,7 @@ local function UpdateDisplay()
             bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
             bar.partyCdText:SetFont(FONT_FACE, bar.cdFontSz,   FONT_FLAGS)
             bar.partyCdText:SetText(string.format("%.0f", rem))
-            bar.partyCdText:SetTextColor(1, 1, 1)
+            bar.partyCdText:SetTextColor(unpack(FONT_COLOR))
             bar.ttRem = rem
         else
             bar.cdBar:SetMinMaxValues(0, 1)
@@ -1119,7 +1235,8 @@ local function UpdateDisplay()
             bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.35)
             bar.partyCdText:SetFont(FONT_FACE, bar.readyFontSz, FONT_FLAGS)
             bar.partyCdText:SetText(db.showReady and "READY" or "")
-            bar.partyCdText:SetTextColor(0.2, 1.0, 0.2)
+            bar.partyCdText:SetTextColor(unpack(FONT_READY_COLOR))
+            bar.partyCdText:SetTextColor(unpack(FONT_READY_COLOR))
             bar.ttRem = 0
         end
     end
@@ -1131,7 +1248,8 @@ local function UpdateDisplay()
         bar:Show()
         bar.icon:SetTexture(mySpellData.icon)
         local col = CLASS_COLORS[myClass] or { 1, 1, 1 }
-        bar.nameText:SetText("|cFFFFFFFF" .. (myName or "?") .. "|r")
+        bar.nameText:SetText(myName or "?")
+        bar.nameText:SetTextColor(unpack(FONT_COLOR))
         bar.ttSpellName = mySpellData.name
         bar.ttBaseCd    = myBaseCd or mySpellData.cd
 
@@ -1141,7 +1259,7 @@ local function UpdateDisplay()
             bar.playerCdText:Show()
             bar.playerCdText:SetFont(FONT_FACE, bar.cdFontSz, FONT_FLAGS)
             bar.playerCdText:SetText(string.format("%.0f", cdRemaining))
-            bar.playerCdText:SetTextColor(1, 1, 1)
+            bar.playerCdText:SetTextColor(unpack(FONT_COLOR))
             bar.cdBar:SetMinMaxValues(0, myBaseCd or mySpellData.cd)
             bar.cdBar:SetValue(cdRemaining)
             bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
@@ -1158,7 +1276,7 @@ local function UpdateDisplay()
             bar.partyCdText:Show()
             bar.partyCdText:SetFont(FONT_FACE, bar.readyFontSz, FONT_FLAGS)
             bar.partyCdText:SetText(db.showReady and "READY" or "")
-            bar.partyCdText:SetTextColor(0.2, 1.0, 0.2)
+            bar.partyCdText:SetTextColor(unpack(FONT_READY_COLOR))
             bar.cdBar:SetMinMaxValues(0, 1)
             bar.cdBar:SetValue(1)
             bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.35)
@@ -1182,7 +1300,8 @@ local function UpdateDisplay()
             bar:Show()
             bar.icon:SetTexture(ekIcon or (ekData and ekData.icon))
             local col = CLASS_COLORS[myClass] or { 1, 1, 1 }
-            bar.nameText:SetText("|cFFFFFFFF" .. (myName or "?") .. "|r")
+            bar.nameText:SetText(myName or "?")
+            bar.nameText:SetTextColor(unpack(FONT_COLOR))
             bar.ttSpellName = ekInfo.name or (ekData and ekData.name) or "?"
             bar.ttBaseCd    = ekInfo.baseCd
 
@@ -1192,7 +1311,7 @@ local function UpdateDisplay()
                 bar.playerCdText:Show()
                 bar.playerCdText:SetFont(FONT_FACE, bar.cdFontSz, FONT_FLAGS)
                 bar.playerCdText:SetText(string.format("%.0f", ekRem))
-                bar.playerCdText:SetTextColor(1, 1, 1)
+                bar.playerCdText:SetTextColor(unpack(FONT_COLOR))
                 bar.cdBar:SetMinMaxValues(0, ekInfo.baseCd)
                 bar.cdBar:SetValue(ekRem)
                 bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
@@ -1204,7 +1323,7 @@ local function UpdateDisplay()
                 bar.partyCdText:Show()
                 bar.partyCdText:SetFont(FONT_FACE, bar.readyFontSz, FONT_FLAGS)
                 bar.partyCdText:SetText(db.showReady and "READY" or "")
-                bar.partyCdText:SetTextColor(0.2, 1.0, 0.2)
+                bar.partyCdText:SetTextColor(unpack(FONT_READY_COLOR))
                 bar.cdBar:SetMinMaxValues(0, 1)
                 bar.cdBar:SetValue(1)
                 bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.35)
@@ -1842,7 +1961,7 @@ local function CreateConfigPanel()
     local PADDING = 24
 
     configFrame = CreateFrame("Frame", "LoxxConfigFrame", UIParent, "BasicFrameTemplate")
-    configFrame:SetSize(PW, PH)
+    configFrame:SetSize(PW + 80, PH + 120)
     configFrame:SetPoint("CENTER")
     configFrame:SetFrameStrata("DIALOG")
     configFrame:SetMovable(true)
@@ -2011,7 +2130,7 @@ local function CreateConfigPanel()
 
     -- FONT SIZES
     yL = yL - 48
-    SectionLabelL("FONT & TEXTURES", yL)
+    SectionLabelL("APPARENCE", yL)
     yL = yL - 28
     local initNameFont = math.max(2, db.nameFontSize or 12)
     local nameSlider = MakeSlider("LOXX_Slider_nameFont", configFrame)
@@ -2069,55 +2188,56 @@ local function CreateConfigPanel()
         RebuildBars()
     end)
 
-    yL = yL - 40
-    SectionLabelL("CUSTOM FONT", yL)
-    yL = yL - 26
-    local fontEditBox = CreateFrame("EditBox", nil, configFrame, "InputBoxTemplate")
-    fontEditBox:SetSize(SL_W, 24)
-    fontEditBox:SetPoint("TOPLEFT", SL_XL, yL)
-    fontEditBox:SetAutoFocus(false)
-    fontEditBox:SetText(db.fontPath or "")
-    fontEditBox:SetCursorPosition(0)
-    fontEditBox:SetScript("OnEnterPressed", function(self)
-        db.fontPath = self:GetText() or ""
-        DetectElvUI()
-        RebuildBars()
+    yL = yL - 36
+    local fontDrop = CreateFrame("Button", nil, configFrame, "UIPanelButtonTemplate")
+    fontDrop:SetSize(SL_W, 24)
+    fontDrop:SetPoint("TOPLEFT", SL_XL, yL)
+    local function RefreshFontLabel()
+        fontDrop:SetText("Police: " .. FONT_PRESETS[db.fontPreset or 1].label)
+    end
+    fontDrop:SetScript("OnClick", function()
+        ShowPresetDropdown(fontDrop, FONT_PRESETS, function(i)
+            db.fontPreset = i
+            ApplyFontPreset()
+            RebuildBars()
+            RefreshFontLabel()
+        end)
     end)
-    local fontResetBtn = CreateFrame("Button", nil, configFrame, "UIPanelButtonTemplate")
-    fontResetBtn:SetSize(60, 22)
-    fontResetBtn:SetPoint("LEFT", fontEditBox, "RIGHT", 6, 0)
-    fontResetBtn:SetText("Reset")
-    fontResetBtn:SetScript("OnClick", function()
-        db.fontPath = ""
-        DetectElvUI()
-        RebuildBars()
-        fontEditBox:SetText("")
-    end)
+    RefreshFontLabel()
 
-    yL = yL - 40
-    SectionLabelL("BAR TEXTURE", yL)
-    yL = yL - 26
-    local texEditBox = CreateFrame("EditBox", nil, configFrame, "InputBoxTemplate")
-    texEditBox:SetSize(SL_W, 24)
-    texEditBox:SetPoint("TOPLEFT", SL_XL, yL)
-    texEditBox:SetAutoFocus(false)
-    texEditBox:SetText(db.barTexture or "")
-    texEditBox:SetCursorPosition(0)
-    texEditBox:SetScript("OnEnterPressed", function(self)
-        db.barTexture = self:GetText() or ""
-        DetectElvUI()
-        RebuildBars()
+    yL = yL - 34
+    local colorDrop = CreateFrame("Button", nil, configFrame, "UIPanelButtonTemplate")
+    colorDrop:SetSize(SL_W, 24)
+    colorDrop:SetPoint("TOPLEFT", SL_XL, yL)
+    local function RefreshColorLabel()
+        colorDrop:SetText("Couleur: " .. FONT_COLOR_PRESETS[db.fontColorPreset or 1].label)
+    end
+    colorDrop:SetScript("OnClick", function()
+        ShowPresetDropdown(colorDrop, FONT_COLOR_PRESETS, function(i)
+            db.fontColorPreset = i
+            ApplyFontPreset()
+            RebuildBars()
+            RefreshColorLabel()
+        end)
     end)
-    local texResetBtn = CreateFrame("Button", nil, configFrame, "UIPanelButtonTemplate")
-    texResetBtn:SetSize(60, 22)
-    texResetBtn:SetPoint("LEFT", texEditBox, "RIGHT", 6, 0)
-    texResetBtn:SetText("Reset")
-    texResetBtn:SetScript("OnClick", function()
-        db.barTexture = ""
-        DetectElvUI()
-        RebuildBars()
-        texEditBox:SetText("")
+    RefreshColorLabel()
+
+    yL = yL - 34
+    local texDrop = CreateFrame("Button", nil, configFrame, "UIPanelButtonTemplate")
+    texDrop:SetSize(SL_W, 24)
+    texDrop:SetPoint("TOPLEFT", SL_XL, yL)
+    local function RefreshTextureLabel()
+        texDrop:SetText("Barres: " .. BAR_TEXTURE_PRESETS[db.barTexturePreset or 1].label)
+    end
+    texDrop:SetScript("OnClick", function()
+        ShowPresetDropdown(texDrop, BAR_TEXTURE_PRESETS, function(i)
+            db.barTexturePreset = i
+            ApplyTexturePreset()
+            RebuildBars()
+            RefreshTextureLabel()
+        end)
     end)
+    RefreshTextureLabel()
 
     -- ── RIGHT COLUMN ─────────────────────────────────────────────
     local yR = -102
@@ -2247,8 +2367,8 @@ local function CreateConfigPanel()
 
     -- ── FOOTER ───────────────────────────────────────────────────
     local buttonColumn = CreateFrame("Frame", nil, configFrame)
-    buttonColumn:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -PADDING, 72)
-    buttonColumn:SetSize(140, 90)
+    buttonColumn:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -PADDING, 96)
+    buttonColumn:SetSize(160, 120)
     local BUTTON_SPACING = 10
 
     local changelogBtn = CreateFrame("Button", nil, buttonColumn, "UIPanelButtonTemplate")
@@ -2295,7 +2415,7 @@ local function CreateConfigPanel()
     statsBtn:SetPoint("BOTTOMRIGHT", savePosBtn, "TOPRIGHT", 0, BUTTON_SPACING)
     statsBtn:SetText("Run Stats")
     if statsBtn.GetFontString and statsBtn:GetFontString() then
-        statsBtn:GetFontString():SetTextColor(1, 0.82, 0)  -- doré (FFFFD100)
+        statsBtn:GetFontString():SetTextColor(1, 0.82, 0)
     end
     statsBtn:SetScript("OnClick", function() ShowStatsWindow() end)
 
@@ -2311,7 +2431,7 @@ local function CreateConfigPanel()
     footerBg:SetVertexColor(0.06, 0.05, 0.03, 0.95)
     local footerMsg = footerBand:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     footerMsg:SetPoint("BOTTOM", footerBand, "BOTTOM", 0, 14)
-    footerMsg:SetText("Thanks to my favorite haters who pushed me to continue this addon  #FUALL")
+    footerMsg:SetText("Keep interrupts sharp – stay ahead of the pull.")
     local footerVer = footerBand:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     footerVer:SetPoint("BOTTOM", footerBand, "BOTTOM", 0, 4)
     footerVer:SetText("|cFF888888v" .. LOXX_VERSION .. "|r")
@@ -2370,6 +2490,7 @@ local function CreateUI()
     -- Title (gold, like Details)
     titleText = mainFrame:CreateFontString(nil, "OVERLAY")
     titleText:SetFont(FONT_FACE, 12, FONT_FLAGS)
+    titleText:SetTextColor(unpack(FONT_COLOR))
     titleText:SetPoint("TOPLEFT", 6, -2)
     titleText:SetPoint("TOPRIGHT", -6, -2)
     titleText:SetHeight(16)
@@ -2403,6 +2524,7 @@ local function CreateUI()
     -- "No kick available" quand la fenêtre est vide (ex: healer sans interrupt)
     local noKickLabel = mainFrame:CreateFontString(nil, "OVERLAY")
     noKickLabel:SetFont(FONT_FACE, 12, FONT_FLAGS)
+    noKickLabel:SetTextColor(unpack(FONT_COLOR))
     noKickLabel:SetPoint("TOP", mainFrame, "TOP", 0, -50)
     noKickLabel:SetPoint("LEFT", mainFrame, "LEFT", 8, 0)
     noKickLabel:SetPoint("RIGHT", mainFrame, "RIGHT", -8, 0)

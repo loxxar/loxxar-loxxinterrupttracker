@@ -4,15 +4,20 @@
 ]]
 
 LOXX_CHANGELOG = [[
+|cFFFFD100v1.2.5.3|r
+• New preset dropdowns for fonts, colors, and bar styles
+• Settings window expanded so the footer stays visible
+
 |cFFFFD100v1.2.5.2|r
-• HEALER_PASS
+• Healing specs updated for 12.0.1 (Resto Shaman only)
+• Settings footer/layout cleaned up
 
 |cFFFFD100v1.2.5.1|r
-• HOTFIX_INIT
+• Fixed load-order crash with interrupt data
 
 |cFFFFD100v1.2.5|r
-• FONT_SELECTOR
-• TEXTURE_PICKER
+• Added preset font selector for the tracker
+• Added preset bar style dropdown
 
 |cFFFFD100v1.2.4.9|r
 • UI_CLEAN_FIXBUG
