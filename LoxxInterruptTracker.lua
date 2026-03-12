@@ -15,7 +15,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.2.4.9"
+local LOXX_VERSION = "1.2.5"
 local LOXX_DB_VERSION = 4   -- bump when SavedVars schema changes
 
 ------------------------------------------------------------
@@ -41,6 +41,18 @@ local ALL_INTERRUPTS = {
     [1276467] = { name = "Fel Ravager",      cd = 25, icon = "Interface\\Icons\\spell_shadow_summonfelhunter" },
     [351338] = { name = "Quell",             cd = 20, icon = 4622469 },
 }
+
+local function GetClassKickInfo(cls, unit)
+    local info = CLASS_INTERRUPTS[cls]
+    if not info then return nil end
+    if cls == "SHAMAN" and unit then
+        local role = UnitGroupRolesAssigned(unit)
+        if role == "HEALER" then
+            return SPEC_INTERRUPT_OVERRIDES[264] or info
+        end
+    end
+    return info
+end
 
 -- Which spells to check per class (order matters: first found wins)
 local CLASS_INTERRUPT_LIST = {
@@ -97,6 +109,8 @@ local DEFAULTS = {
     hideOutOfCombat = false,
     rotationEnabled = false,
     showKicksReadyBar = true,
+    fontPath        = "",
+    barTexture      = "",
 }
 
 ------------------------------------------------------------
@@ -305,12 +319,18 @@ local function DetectElvUI()
         if gf then FONT_FACE = gf end
     end
 
-    if ElvUI then
+    if db and db.fontPath and db.fontPath ~= "" then
+        FONT_FACE = db.fontPath
+    elseif ElvUI then
         local E = unpack(ElvUI)
-        if E and E.media then
-            if E.media.normFont then FONT_FACE = E.media.normFont end
-            if E.media.normTex then BAR_TEXTURE = E.media.normTex end
-        end
+        if E and E.media and E.media.normFont then FONT_FACE = E.media.normFont end
+    end
+
+    if db and db.barTexture and db.barTexture ~= "" then
+        BAR_TEXTURE = db.barTexture
+    elseif ElvUI then
+        local E = unpack(ElvUI)
+        if E and E.media and E.media.normTex then BAR_TEXTURE = E.media.normTex end
     end
 end
 
@@ -568,7 +588,7 @@ local function AutoRegisterPartyByClass()
                             print("|cFF00DDDD[SPY]|r Skipping " .. name .. " (" .. cls .. " HEALER) - no kick expected")
                         end
                     else
-                        local kickInfo = CLASS_INTERRUPTS[cls]
+                        local kickInfo = GetClassKickInfo(cls, u)
                         partyAddonUsers[name] = {
                             class = cls,
                             spellID = kickInfo.id,
@@ -1984,7 +2004,7 @@ local function CreateConfigPanel()
 
     -- FONT SIZES
     yL = yL - 48
-    SectionLabelL("FONT SIZES", yL)
+    SectionLabelL("FONT & TEXTURES", yL)
     yL = yL - 28
     local initNameFont = math.max(2, db.nameFontSize or 12)
     local nameSlider = MakeSlider("LOXX_Slider_nameFont", configFrame)
@@ -2040,6 +2060,56 @@ local function CreateConfigPanel()
         db.readyTextSize = value
         self.Text:SetText("Ready Size: " .. tostring(value))
         RebuildBars()
+    end)
+
+    yL = yL - 40
+    SectionLabelL("CUSTOM FONT", yL)
+    yL = yL - 26
+    local fontEditBox = CreateFrame("EditBox", nil, configFrame, "InputBoxTemplate")
+    fontEditBox:SetSize(SL_W, 24)
+    fontEditBox:SetPoint("TOPLEFT", SL_XL, yL)
+    fontEditBox:SetAutoFocus(false)
+    fontEditBox:SetText(db.fontPath or "")
+    fontEditBox:SetCursorPosition(0)
+    fontEditBox:SetScript("OnEnterPressed", function(self)
+        db.fontPath = self:GetText() or ""
+        DetectElvUI()
+        RebuildBars()
+    end)
+    local fontResetBtn = CreateFrame("Button", nil, configFrame, "UIPanelButtonTemplate")
+    fontResetBtn:SetSize(60, 22)
+    fontResetBtn:SetPoint("LEFT", fontEditBox, "RIGHT", 6, 0)
+    fontResetBtn:SetText("Reset")
+    fontResetBtn:SetScript("OnClick", function()
+        db.fontPath = ""
+        DetectElvUI()
+        RebuildBars()
+        fontEditBox:SetText("")
+    end)
+
+    yL = yL - 40
+    SectionLabelL("BAR TEXTURE", yL)
+    yL = yL - 26
+    local texEditBox = CreateFrame("EditBox", nil, configFrame, "InputBoxTemplate")
+    texEditBox:SetSize(SL_W, 24)
+    texEditBox:SetPoint("TOPLEFT", SL_XL, yL)
+    texEditBox:SetAutoFocus(false)
+    texEditBox:SetText(db.barTexture or "")
+    texEditBox:SetCursorPosition(0)
+    texEditBox:SetScript("OnEnterPressed", function(self)
+        db.barTexture = self:GetText() or ""
+        DetectElvUI()
+        RebuildBars()
+    end)
+    local texResetBtn = CreateFrame("Button", nil, configFrame, "UIPanelButtonTemplate")
+    texResetBtn:SetSize(60, 22)
+    texResetBtn:SetPoint("LEFT", texEditBox, "RIGHT", 6, 0)
+    texResetBtn:SetText("Reset")
+    texResetBtn:SetScript("OnClick", function()
+        db.barTexture = ""
+        DetectElvUI()
+        RebuildBars()
+        texEditBox:SetText("")
     end)
 
     -- ── RIGHT COLUMN ─────────────────────────────────────────────
@@ -2343,6 +2413,7 @@ local function CreateUI()
             LoxxSaveFramePosition(mainFrame)
         end
     end)
+    DetectElvUI()
     RebuildBars()
 end
 
@@ -3187,7 +3258,7 @@ local function OnMobInterrupted(unit)
                         local _, cls = UnitClass(u)
                         local role = UnitGroupRolesAssigned(u)
                         if cls and CLASS_INTERRUPTS[cls] and not (role == "HEALER" and cls ~= "SHAMAN") then
-                            local kickInfo = CLASS_INTERRUPTS[cls]
+                            local kickInfo = GetClassKickInfo(cls, u)
                             partyAddonUsers[bestName] = {
                                 class = cls,
                                 spellID = kickInfo.id,
@@ -3342,14 +3413,16 @@ ef:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
                 -- Re-register with class default
                 local _, cls = UnitClass(changedUnit)
                 if cls and CLASS_INTERRUPTS[cls] then
-                    local kickInfo = CLASS_INTERRUPTS[cls]
-                    partyAddonUsers[name] = {
-                        class = cls,
-                        spellID = kickInfo.id,
-                        baseCd = kickInfo.cd,
-                        cdEnd = 0,
-                        onKickReduction = nil,
-                    }
+                    local kickInfo = GetClassKickInfo(cls, changedUnit)
+                    if kickInfo then
+                        partyAddonUsers[name] = {
+                            class = cls,
+                            spellID = kickInfo.id,
+                            baseCd = kickInfo.cd,
+                            cdEnd = 0,
+                            onKickReduction = nil,
+                        }
+                    end
                 end
                 if spyMode then
                     print("|cFF00DDDD[SPY]|r " .. name .. " changed spec → re-inspecting")
