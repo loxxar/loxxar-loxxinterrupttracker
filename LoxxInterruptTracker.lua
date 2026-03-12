@@ -15,7 +15,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.2.5.1"
+local LOXX_VERSION = "1.2.5.2"
 local LOXX_DB_VERSION = 4   -- bump when SavedVars schema changes
 
 ------------------------------------------------------------
@@ -32,7 +32,6 @@ local ALL_INTERRUPTS = {
     [96231]  = { name = "Rebuke",            cd = 15, icon = 523893 },
     [183752] = { name = "Disrupt",           cd = 15, icon = 1305153 },
     [116705] = { name = "Spear Hand Strike", cd = 15, icon = 608940 },
-    [15487]  = { name = "Silence",           cd = 45, icon = 458230 },
     [147362] = { name = "Counter Shot",      cd = 24, icon = 249170 },
     [187707] = { name = "Muzzle",            cd = 15, icon = 1376045 },
     [19647]  = { name = "Spell Lock",        cd = 24, icon = 136174 },
@@ -53,7 +52,6 @@ local CLASS_INTERRUPT_LIST = {
     PALADIN     = { 96231 },
     DEMONHUNTER = { 183752 },
     MONK        = { 116705 },
-    PRIEST      = { 15487 },                    -- Silence (shadow only)
     HUNTER      = { 147362, 187707 },           -- Counter Shot (BM/MM), Muzzle (survival)
     WARLOCK     = { 19647, 132409, 119914 },
     EVOKER      = { 351338 },
@@ -178,7 +176,6 @@ local CLASS_INTERRUPTS = {
     HUNTER      = { id = 147362, cd = 24, name = "Counter Shot" },
     MONK        = { id = 116705, cd = 15, name = "Spear Hand Strike" },
     WARLOCK     = { id = 19647,  cd = 24, name = "Spell Lock" },
-    PRIEST      = { id = 15487,  cd = 45, name = "Silence" },
     EVOKER      = { id = 351338, cd = 20, name = "Quell" },
 }
 
@@ -204,12 +201,13 @@ end
 -- Specs that have NO interrupt (remove from tracker after inspect)
 -- Be conservative: only list specs we're SURE have no interrupt
 local SPEC_NO_INTERRUPT = {
-    [256]  = true, -- Discipline Priest (no Silence)
-    [257]  = true, -- Holy Priest (no Silence)
-    [105]  = true, -- Restoration Druid (Skull Bash removed in 12.0)
-    [65]   = true, -- Holy Paladin (no Rebuke)
-    -- [1468] = true, -- Preservation Evoker - verify if Quell removed
-    -- [270]  = true, -- Mistweaver Monk - verify if Spear Hand Strike removed
+    [256]  = true, -- Discipline Priest
+    [257]  = true, -- Holy Priest
+    [258]  = true, -- Shadow Priest
+    [105]  = true, -- Restoration Druid
+    [65]   = true, -- Holy Paladin
+    [1468] = true, -- Preservation Evoker
+    [270]  = true, -- Mistweaver Monk
 }
 
 -- Talents that PERMANENTLY reduce interrupt cooldowns (scanned via inspect)
@@ -573,6 +571,14 @@ local HEALER_KEEPS_KICK = {
     SHAMAN  = true, -- Resto Shaman keeps Wind Shear
 }
 
+local function UnitIsMistweaver(unit)
+    if not unit or not UnitExists(unit) then return false end
+    local _, cls = UnitClass(unit)
+    if cls ~= "MONK" then return false end
+    local powerType = UnitPowerType(unit)
+    return powerType == 0 -- mana → Mistweaver (WW/BM use energy)
+end
+
 local function AutoRegisterPartyByClass()
     for i = 1, 4 do
         local u = "party" .. i
@@ -583,9 +589,10 @@ local function AutoRegisterPartyByClass()
                 if not partyAddonUsers[name] and not noInterruptPlayers[name] then
                     -- Skip healers from classes that lose their kick as healer
                     local role = UnitGroupRolesAssigned(u)
-                    if role == "HEALER" and not HEALER_KEEPS_KICK[cls] then
+                    local isHealer = (role == "HEALER")
+                    if (isHealer or UnitIsMistweaver(u)) and not HEALER_KEEPS_KICK[cls] then
                         if spyMode then
-                            print("|cFF00DDDD[SPY]|r Skipping " .. name .. " (" .. cls .. " HEALER) - no kick expected")
+                            print("|cFF00DDDD[SPY]|r Skipping " .. name .. " (" .. cls .. " no-kick spec) - no kick expected")
                         end
                     else
                         local kickInfo = GetClassKickInfo(cls, u)
