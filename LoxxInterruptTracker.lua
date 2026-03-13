@@ -15,8 +15,9 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.2.5.4"
+local LOXX_VERSION = "1.3.0"
 local LOXX_DB_VERSION = 4   -- bump when SavedVars schema changes
+local L = LoxxL or {}       -- localization table (set by localization.lua)
 
 ------------------------------------------------------------
 -- Spell data (multiple possible interrupts per class/spec)
@@ -182,7 +183,9 @@ local myIsPetSpell = false      -- is our primary kick a pet spell?
 local myExtraKicks = {}         -- extra kicks for own player {spellID → {baseCd, cdEnd}}
 local partyAddonUsers = {}
 local bars = {}
-local wasOnCd = {}            -- tracks CD state per player key for sound transitions
+local cachedPartyEntries = {}  -- reused table; rebuilt only when displayDirty=true
+local displayDirty       = true -- true = rebuild cachedPartyEntries from scratch next tick
+local playerWasOnCd      = false -- own kick: was on CD last tick (for sound-on-ready)
 local MAX_BARS        = 40   -- absolute cap (supports up to 40-man raids)
 local currentMaxBars  = 7    -- updated dynamically based on group size
 local mainFrame, titleText, configFrame
@@ -261,7 +264,6 @@ end
 local SPEC_NO_INTERRUPT = {
     [256]  = true, -- Discipline Priest
     [257]  = true, -- Holy Priest
-    [258]  = true, -- Shadow Priest
     [105]  = true, -- Restoration Druid
     [65]   = true, -- Holy Paladin
     [1468] = true, -- Preservation Evoker
@@ -306,6 +308,7 @@ local SPEC_EXTRA_KICKS = {
 local SPELL_ALIASES = {
     [1276467] = 132409,  -- Fel Ravager summon → Spell Lock extra kick bar
     [132409]  = 19647,   -- Command Demon: Spell Lock → primary Spell Lock bar (19647)
+    [89766]   = 119914,  -- Axe Toss pet spell (Felguard) → primary Axe Toss bar
                          -- Note: Demo Warlock extra kick check still uses original spellID before alias
 }
 
@@ -360,6 +363,15 @@ local function LoxxLogError(msg)
     table.insert(loxxErrorLog, 1, entry)   -- newest first
     while #loxxErrorLog > 50 do table.remove(loxxErrorLog) end
     if LOXXSavedVars then LOXXSavedVars.loxxErrorLog = loxxErrorLog end
+end
+
+------------------------------------------------------------
+-- Display dirty flag helper
+-- Call whenever the player roster or a player's spec/kicks changes.
+-- Does NOT need to be called for CD updates (rem is updated in-place).
+------------------------------------------------------------
+local function SetDisplayDirty()
+    displayDirty = true
 end
 
 ------------------------------------------------------------
@@ -487,6 +499,7 @@ local function OnAddonMessage(prefix, message, channel, sender)
             if baseCd and baseCd > 0 then
                 partyAddonUsers[shortName].baseCd = baseCd
             end
+            SetDisplayDirty()
             AnnounceJoin()
         end
     elseif command == "CAST" then
@@ -557,6 +570,7 @@ local function OnSpellCastSucceeded(unit, castGUID, spellID, isParty, cleanName)
                             cdEnd = now + ekData.cd,
                             name = ekData.name,
                         })
+                        SetDisplayDirty()
                         if spyMode then
                             print("|cFF00DDDD[SPY]|r Auto-added extra kick for " .. cleanName .. ": " .. ekData.name .. " CD=" .. ekData.cd .. "s")
                         end
@@ -597,6 +611,7 @@ local function OnSpellCastSucceeded(unit, castGUID, spellID, isParty, cleanName)
                     cdEnd = now + (ALL_INTERRUPTS[spellID] and ALL_INTERRUPTS[spellID].cd or 15),
                     lastKickTime = now,
                 }
+                SetDisplayDirty()
             end
         end
         return
@@ -652,6 +667,7 @@ local function CleanPartyList()
     for name in pairs(inspectedPlayers) do
         if not currentNames[name] then inspectedPlayers[name] = nil end
     end
+    SetDisplayDirty()
     AnnounceJoin()
 end
 
@@ -692,6 +708,7 @@ local function AutoRegisterPartyByClass()
                             baseCd = kickInfo.cd,
                             cdEnd = 0,
                         }
+                        SetDisplayDirty()
                         if spyMode then
                             print("|cFF00DDDD[SPY]|r Auto-registered " .. name .. " (" .. cls .. ") " .. kickInfo.name .. " CD=" .. kickInfo.cd)
                         end
@@ -1124,9 +1141,9 @@ local function RebuildBars()
             GameTooltip:ClearLines()
             GameTooltip:AddLine(self.ttSpellName, 1, 1, 1)
             if self.ttRem and self.ttRem > 0 then
-                GameTooltip:AddLine(string.format("CD: %.1fs / %.0fs", self.ttRem, self.ttBaseCd or 0), 1, 0.82, 0)
+                GameTooltip:AddLine(string.format(L["TOOLTIP_CD"], self.ttRem, self.ttBaseCd or 0), 1, 0.82, 0)
             else
-                GameTooltip:AddLine("READY", 0, 1, 0)
+                GameTooltip:AddLine(L["TOOLTIP_READY"], 0, 1, 0)
             end
             GameTooltip:Show()
         end)
@@ -1180,6 +1197,108 @@ local function CheckZoneVisibility()
     end
 end
 
+------------------------------------------------------------
+-- Alert band: "next global availability" strip
+-- Returns the height consumed (0 if hidden, 22 if shown).
+------------------------------------------------------------
+local function UpdateAlertBand(numVisible, now)
+    if not mainFrame.alertBand then return 0 end
+    if numVisible == 0 or db.showKicksReadyBar == false then
+        mainFrame.alertBand:Hide()
+        return 0
+    end
+
+    -- Returns true if any kick (primary or extra) is ready right now
+    local function PlayerHasReadyKick(info)
+        if not info then return false end
+        if info.cdEnd and info.cdEnd <= now then return true end
+        if info.extraKicks then
+            for _, ek in ipairs(info.extraKicks) do
+                if not ek.cdEnd or ek.cdEnd <= now then return true end
+            end
+        end
+        return false
+    end
+
+    -- Returns the smallest remaining CD for a player, or nil if all ready
+    local function PlayerNextRemaining(info)
+        local best = nil
+        if info and info.cdEnd and info.cdEnd > now then
+            best = info.cdEnd - now
+        end
+        if info and info.extraKicks then
+            for _, ek in ipairs(info.extraKicks) do
+                if ek.cdEnd and ek.cdEnd > now then
+                    local r = ek.cdEnd - now
+                    if best == nil or r < best then best = r end
+                end
+            end
+        end
+        return best
+    end
+
+    local minRem     = nil
+    local nextKicker = nil
+    local readyCount = 0
+    local firstName  = nil
+
+    -- Self (primary kick)
+    if mySpellID and ALL_INTERRUPTS[mySpellID] then
+        if myKickCdEnd <= now then
+            readyCount = readyCount + 1
+            if firstName == nil then firstName = myName end
+        else
+            local r = myKickCdEnd - now
+            if minRem == nil or r < minRem then minRem = r; nextKicker = myName end
+        end
+    end
+    -- Self (extra kicks)
+    for _, ekInfo in pairs(myExtraKicks) do
+        if ekInfo.cdEnd and ekInfo.cdEnd <= now then
+            readyCount = readyCount + 1
+            if firstName == nil then firstName = myName end
+        elseif ekInfo.cdEnd and ekInfo.cdEnd > now then
+            local r = ekInfo.cdEnd - now
+            if minRem == nil or r < minRem then minRem = r; nextKicker = myName end
+        end
+    end
+
+    -- Party
+    for name, info in pairs(partyAddonUsers) do
+        if PlayerHasReadyKick(info) then
+            readyCount = readyCount + 1
+            if firstName == nil then firstName = name end
+        else
+            local r = PlayerNextRemaining(info)
+            if r and (minRem == nil or r < minRem) then minRem = r; nextKicker = name end
+        end
+    end
+
+    mainFrame.alertBand:Show()
+    if readyCount > 0 then
+        mainFrame.alertBand.bg:SetVertexColor(0.0, 0.28, 0.0, 0.9)
+        if readyCount == 1 then
+            mainFrame.alertBand.label:SetText(
+                "|cFF44FF44" .. string.format(L["ALERT_ONE_READY"], firstName or "?") .. "|r")
+        else
+            mainFrame.alertBand.label:SetText(
+                "|cFF44FF44" .. string.format(L["ALERT_N_READY"], readyCount, firstName or "?") .. "|r")
+        end
+    elseif minRem and minRem < 3 then
+        mainFrame.alertBand.bg:SetVertexColor(0.55, 0.30, 0.0, 0.9)
+        mainFrame.alertBand.label:SetText(
+            "|cFFFFAA00" .. string.format(L["ALERT_INCOMING"], nextKicker or "?", minRem) .. "|r")
+    elseif minRem then
+        mainFrame.alertBand.bg:SetVertexColor(0.50, 0.0, 0.0, 0.9)
+        mainFrame.alertBand.label:SetText(
+            "|cFFFF3030" .. string.format(L["ALERT_NO_KICK"], minRem) .. "|r")
+    else
+        mainFrame.alertBand:Hide()
+        return 0
+    end
+    return 22
+end
+
 local function UpdateDisplay()
     if not ready or not shouldShowByZone then return end
 
@@ -1212,7 +1331,7 @@ local function UpdateDisplay()
             bar.cdBar:SetValue(1)
             bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
             bar.partyCdText:SetFont(FONT_FACE, bar.readyFontSz, FONT_FLAGS)
-            bar.partyCdText:SetText(db.showReady and "READY" or "")
+            bar.partyCdText:SetText(db.showReady and L["READY"] or "")
             bar.partyCdText:SetTextColor(unpack(FONT_READY_COLOR))
             bar.partyCdText:SetTextColor(unpack(FONT_READY_COLOR))
             bar.ttRem = 0
@@ -1242,18 +1361,18 @@ local function UpdateDisplay()
             bar.cdBar:SetValue(cdRemaining)
             bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
             bar.playerCdWrapper:SetAlpha(1)
-            wasOnCd["__self__"] = true
+            playerWasOnCd = true
             bar.ttRem = cdRemaining
         else
-            if wasOnCd["__self__"] and db.soundOnReady then
+            if playerWasOnCd and db.soundOnReady then
                 PlaySound(db.soundID or 8960, "Master")
             end
-            wasOnCd["__self__"] = false
+            playerWasOnCd = false
             bar.playerCdText:Hide()
             bar.playerCdWrapper:SetAlpha(1)
             bar.partyCdText:Show()
             bar.partyCdText:SetFont(FONT_FACE, bar.readyFontSz, FONT_FLAGS)
-            bar.partyCdText:SetText(db.showReady and "READY" or "")
+            bar.partyCdText:SetText(db.showReady and L["READY"] or "")
             bar.partyCdText:SetTextColor(unpack(FONT_READY_COLOR))
             bar.cdBar:SetMinMaxValues(0, 1)
             bar.cdBar:SetValue(1)
@@ -1300,7 +1419,7 @@ local function UpdateDisplay()
                 bar.playerCdWrapper:SetAlpha(1)
                 bar.partyCdText:Show()
                 bar.partyCdText:SetFont(FONT_FACE, bar.readyFontSz, FONT_FLAGS)
-                bar.partyCdText:SetText(db.showReady and "READY" or "")
+                bar.partyCdText:SetText(db.showReady and L["READY"] or "")
                 bar.partyCdText:SetTextColor(unpack(FONT_READY_COLOR))
                 bar.cdBar:SetMinMaxValues(0, 1)
                 bar.cdBar:SetValue(1)
@@ -1311,49 +1430,63 @@ local function UpdateDisplay()
         end
     end
 
-    -- ── 3. PARTY BARS — collected then sorted ────────────────────
+    -- ── 3. PARTY BARS — cached, rebuilt only when roster changes ─────────────────
     -- Sort: READY first; within READY shorter baseCd first (more precious);
     --       within ON CD soonest-ready first.
-    local partyEntries = {}
-    for name, info in pairs(partyAddonUsers) do
-        local ok, data = pcall(function() return info.spellID and ALL_INTERRUPTS[info.spellID] end)
-        if ok and data then
-            local rem = 0
-            if info.cdEnd > now then rem = info.cdEnd - now end
-            local baseCd = info.baseCd or data.cd
-            table.insert(partyEntries, {
-                kind    = "party",
-                name    = name, info = info, data = data,
-                rem     = rem,  baseCd = baseCd,
-                isReady = (rem <= 0.5),
-            })
-        elseif spyMode and info.spellID then
-            print("|cFFFF4400[LOXX]|r Unknown spellID=" .. tostring(info.spellID) .. " for " .. name)
-        end
+    if displayDirty then
+        -- Roster changed: wipe and rebuild cachedPartyEntries from scratch.
+        -- pcall guards are needed here because spellID lookups can taint in 12.0.
+        wipe(cachedPartyEntries)
+        for name, info in pairs(partyAddonUsers) do
+            local ok, data = pcall(function() return info.spellID and ALL_INTERRUPTS[info.spellID] end)
+            if ok and data then
+                local rem = (info.cdEnd > now) and (info.cdEnd - now) or 0
+                local baseCd = info.baseCd or data.cd
+                table.insert(cachedPartyEntries, {
+                    kind    = "party",
+                    name    = name, info = info, data = data,
+                    rem     = rem,  baseCd = baseCd,
+                    isReady = (rem <= 0.5),
+                })
+            elseif spyMode and info.spellID then
+                print("|cFFFF4400[LOXX]|r Unknown spellID=" .. tostring(info.spellID) .. " for " .. name)
+            end
 
-        if info.extraKicks then
-            local col = CLASS_COLORS[info.class] or { 1, 1, 1 }
-            for _, ek in ipairs(info.extraKicks) do
-                local okEk, ekData = pcall(function()
-                    return ek.spellID and ALL_INTERRUPTS[ek.spellID]
-                end)
-                local ekIcon = ek.icon or (okEk and ekData and ekData.icon)
-                if ekIcon or (okEk and ekData) then
-                    local ekRem = 0
-                    if ek.cdEnd > now then ekRem = ek.cdEnd - now end
-                    table.insert(partyEntries, {
-                        kind    = "partyExtra",
-                        name    = name, info = info, ek = ek,
-                        ekData  = okEk and ekData, ekIcon = ekIcon,
-                        ekRem   = ekRem, baseCd = ek.baseCd,
-                        isReady = (ekRem <= 0.5), col = col,
-                    })
+            if info.extraKicks then
+                local col = CLASS_COLORS[info.class] or { 1, 1, 1 }
+                for _, ek in ipairs(info.extraKicks) do
+                    local okEk, ekData = pcall(function()
+                        return ek.spellID and ALL_INTERRUPTS[ek.spellID]
+                    end)
+                    local ekIcon = ek.icon or (okEk and ekData and ekData.icon)
+                    if ekIcon or (okEk and ekData) then
+                        local ekRem = (ek.cdEnd > now) and (ek.cdEnd - now) or 0
+                        table.insert(cachedPartyEntries, {
+                            kind    = "partyExtra",
+                            name    = name, info = info, ek = ek,
+                            ekData  = okEk and ekData, ekIcon = ekIcon,
+                            ekRem   = ekRem, baseCd = ek.baseCd,
+                            isReady = (ekRem <= 0.5), col = col,
+                        })
+                    end
                 end
+            end
+        end
+        displayDirty = false
+    else
+        -- Roster unchanged: update rem/ekRem and isReady in-place (no alloc).
+        for _, e in ipairs(cachedPartyEntries) do
+            if e.kind == "party" then
+                e.rem     = (e.info.cdEnd > now) and (e.info.cdEnd - now) or 0
+                e.isReady = (e.rem <= 0.5)
+            else
+                e.ekRem   = (e.ek.cdEnd > now) and (e.ek.cdEnd - now) or 0
+                e.isReady = (e.ekRem <= 0.5)
             end
         end
     end
 
-    table.sort(partyEntries, function(a, b)
+    table.sort(cachedPartyEntries, function(a, b)
         if a.isReady ~= b.isReady then return a.isReady end
         if a.isReady then
             local aB, bB = (a.baseCd or 0), (b.baseCd or 0)
@@ -1370,19 +1503,19 @@ local function UpdateDisplay()
         return (a.name or "") < (b.name or "")  -- stable: alphabetical tiebreak
     end)
 
-    for _, e in ipairs(partyEntries) do
+    for _, e in ipairs(cachedPartyEntries) do
         if barIdx > currentMaxBars then break end
         local bar = bars[barIdx]
         if e.kind == "party" then
             local col = CLASS_COLORS[e.info.class] or { 1, 1, 1 }
             RenderPartyBar(bar, e.data.icon, e.name, col, e.baseCd, e.rem, e.data.name)
             if e.rem <= 0.5 then
-                if wasOnCd[e.name] and db.soundOnReady then
+                if e.info.wasOnCd and db.soundOnReady then
                     PlaySound(db.soundID or 8960, "Master")
                 end
-                wasOnCd[e.name] = false
+                e.info.wasOnCd = false
             else
-                wasOnCd[e.name] = true
+                e.info.wasOnCd = true
             end
         else -- partyExtra
             local col = e.col
@@ -1412,106 +1545,13 @@ local function UpdateDisplay()
     end
 
     -- ── Optional "next global availability" strip ─────────────────────
-    local alertH = 0
-    if mainFrame.alertBand then
-        if numVisible == 0 or db.showKicksReadyBar == false then
-            mainFrame.alertBand:Hide()
-        else
-            alertH = 22
-            mainFrame.alertBand:Show()
-
-            -- Iterate all players: count ready kicks, find next available
-            local minRem      = nil
-            local nextKicker  = nil
-            local readyCount  = 0
-            local firstName   = nil
-
-            -- Helper: check if a kick (primary or extra) is ready for a player
-            local function PlayerHasReadyKick(info, now)
-                if not info then return false end
-                if info.cdEnd and info.cdEnd <= now then return true end
-                if info.extraKicks then
-                    for _, ek in ipairs(info.extraKicks) do
-                        if not ek.cdEnd or ek.cdEnd <= now then return true end
-                    end
-                end
-                return false
-            end
-            local function PlayerNextRemaining(info, now)
-                local best = nil
-                if info and info.cdEnd and info.cdEnd > now then
-                    best = info.cdEnd - now
-                end
-                if info and info.extraKicks then
-                    for _, ek in ipairs(info.extraKicks) do
-                        if ek.cdEnd and ek.cdEnd > now then
-                            local r = ek.cdEnd - now
-                            if best == nil or r < best then best = r end
-                        end
-                    end
-                end
-                return best
-            end
-
-            -- Self
-            if mySpellID and ALL_INTERRUPTS[mySpellID] then
-                if myKickCdEnd <= now then
-                    readyCount = readyCount + 1
-                    if firstName == nil then firstName = myName end
-                else
-                    local r = myKickCdEnd - now
-                    if minRem == nil or r < minRem then minRem = r; nextKicker = myName end
-                end
-            end
-            for _, ekInfo in pairs(myExtraKicks) do
-                if ekInfo.cdEnd and ekInfo.cdEnd <= now then
-                    readyCount = readyCount + 1
-                    if firstName == nil then firstName = myName end
-                elseif ekInfo.cdEnd and ekInfo.cdEnd > now then
-                    local r = ekInfo.cdEnd - now
-                    if minRem == nil or r < minRem then minRem = r; nextKicker = myName end
-                end
-            end
-
-            -- Party
-            for name, info in pairs(partyAddonUsers) do
-                if PlayerHasReadyKick(info, now) then
-                    readyCount = readyCount + 1
-                    if firstName == nil then firstName = name end
-                else
-                    local r = PlayerNextRemaining(info, now)
-                    if r and (minRem == nil or r < minRem) then minRem = r; nextKicker = name end
-                end
-            end
-
-            if readyCount > 0 then
-                mainFrame.alertBand.bg:SetVertexColor(0.0, 0.28, 0.0, 0.9)
-                if readyCount == 1 then
-                    mainFrame.alertBand.label:SetText(
-                        "|cFF44FF44" .. (firstName or "?") .. " — READY|r")
-                else
-                    mainFrame.alertBand.label:SetText(string.format(
-                        "|cFF44FF44%d kicks ready  (%s)|r", readyCount, firstName or "?"))
-                end
-            elseif minRem and minRem < 3 then
-                mainFrame.alertBand.bg:SetVertexColor(0.55, 0.30, 0.0, 0.9)
-                mainFrame.alertBand.label:SetText(string.format(
-                    "|cFFFFAA00%s in %.1fs|r", nextKicker or "?", minRem))
-            elseif minRem then
-                mainFrame.alertBand.bg:SetVertexColor(0.50, 0.0, 0.0, 0.9)
-                mainFrame.alertBand.label:SetText(string.format(
-                    "|cFFFF3030NO KICK — %.0fs|r", minRem))
-            else
-                mainFrame.alertBand:Hide()
-                alertH = 0
-            end
-        end
-    end
+    local alertH = UpdateAlertBand(numVisible, now)
 
     -- Auto-fit height to visible bars (do NOT touch position - was causing window to jump)
-    if numVisible > 0 then
-        mainFrame:SetHeight(titleH + numVisible * (barH + 1) + alertH)
-    end
+    -- If no bars visible, use minimum height for title + "no kick" label
+    local minHeight = titleH + 40
+    local calcHeight = numVisible > 0 and (titleH + numVisible * (barH + 1) + alertH) or minHeight
+    mainFrame:SetHeight(math.max(minHeight, calcHeight))
 end
 
 ------------------------------------------------------------
@@ -1897,7 +1937,7 @@ local function ShowChangelogWindow()
     hdrTitle:SetShadowColor(0, 0, 0, 1)
     hdrTitle:SetPoint("TOP", 0, -40)
     hdrTitle:SetJustifyH("CENTER")
-    hdrTitle:SetText("|cFFFFD100Changelog|r")
+    hdrTitle:SetText("|cFFFFD100" .. L["CHANGELOG_TITLE"] .. "|r")
 
     -- ScrollFrame
     local scroll = CreateFrame("ScrollFrame", nil, changelogFrame, "UIPanelScrollFrameTemplate")
@@ -1916,7 +1956,7 @@ local function ShowChangelogWindow()
     txt:SetWordWrap(true)
     txt:SetNonSpaceWrap(false)
     txt:SetFont(FONT_FACE, 10, FONT_FLAGS)
-    txt:SetText(LOXX_CHANGELOG or "No changelog available.")
+    txt:SetText(LOXX_CHANGELOG or L["CHANGELOG_EMPTY"])
 
     -- Hauteur du contenu pour le scroll (estimation par lignes)
     local lineHeight = 18
@@ -1949,33 +1989,64 @@ local function CreateConfigPanel()
     configFrame:SetScript("OnDragStop",  configFrame.StopMovingOrSizing)
     configFrame:SetClampedToScreen(true)
     if configFrame.TitleText then configFrame.TitleText:SetText("") end
+    -- Escape key closes Settings (and triggers OnHide → closes child windows)
+    table.insert(UISpecialFrames, "LoxxConfigFrame")
+    -- Close child windows when Settings is closed
+    configFrame:SetScript("OnHide", function()
+        if statsFrame     then statsFrame:Hide();     statsFrame     = nil end
+        if changelogFrame then changelogFrame:Hide(); changelogFrame = nil end
+    end)
 
-    -- Header (decorative only)
+    -- Header background: warm dark
     local hdr = configFrame:CreateTexture(nil, "BACKGROUND", nil, 2)
     hdr:SetTexture(FLAT_TEX)
     hdr:SetVertexColor(0.12, 0.09, 0.02, 1)
     hdr:SetPoint("TOPLEFT",  0, -22)
     hdr:SetPoint("TOPRIGHT", 0, -22)
-    hdr:SetHeight(52)
+    hdr:SetHeight(64)
+    -- Gold top separator
     local hdrLineTop = configFrame:CreateTexture(nil, "BORDER")
     hdrLineTop:SetTexture(FLAT_TEX)
     hdrLineTop:SetVertexColor(0.87, 0.73, 0.37, 0.75)
     hdrLineTop:SetPoint("TOPLEFT",  0, -22)
     hdrLineTop:SetPoint("TOPRIGHT", 0, -22)
     hdrLineTop:SetHeight(1)
+    -- Gold bottom separator
     local hdrLineBot = configFrame:CreateTexture(nil, "BORDER")
     hdrLineBot:SetTexture(FLAT_TEX)
     hdrLineBot:SetVertexColor(0.87, 0.73, 0.37, 0.75)
     hdrLineBot:SetPoint("TOPLEFT",  0, -86)
     hdrLineBot:SetPoint("TOPRIGHT", 0, -86)
     hdrLineBot:SetHeight(1)
+    -- Title: centered, gold
     local hdrTitle = configFrame:CreateFontString(nil, "OVERLAY")
-    hdrTitle:SetFont(FONT_FACE, 28, FONT_FLAGS)
+    hdrTitle:SetFont(FONT_FACE, 22, FONT_FLAGS)
     hdrTitle:SetShadowOffset(2, -2)
     hdrTitle:SetShadowColor(0, 0, 0, 1)
-    hdrTitle:SetPoint("TOP", 0, -40)
+    hdrTitle:SetPoint("CENTER", configFrame, "TOP", 0, -44)
     hdrTitle:SetJustifyH("CENTER")
-    hdrTitle:SetText("|cFFFFD100Loxx Interrupt Tracker|r")
+    hdrTitle:SetText("|cFFFFD100" .. L["SETTINGS_TITLE"] .. "|r")
+    -- Decorative gold lines flanking the title
+    local hdrLineL = configFrame:CreateTexture(nil, "ARTWORK")
+    hdrLineL:SetTexture(FLAT_TEX)
+    hdrLineL:SetHeight(1)
+    hdrLineL:SetVertexColor(0.87, 0.73, 0.37, 0.55)
+    hdrLineL:SetPoint("LEFT",  configFrame, "TOPLEFT", 16, -44)
+    hdrLineL:SetPoint("RIGHT", hdrTitle, "LEFT", -10, 0)
+    local hdrLineR = configFrame:CreateTexture(nil, "ARTWORK")
+    hdrLineR:SetTexture(FLAT_TEX)
+    hdrLineR:SetHeight(1)
+    hdrLineR:SetVertexColor(0.87, 0.73, 0.37, 0.55)
+    hdrLineR:SetPoint("LEFT",  hdrTitle, "RIGHT", 10, 0)
+    hdrLineR:SetPoint("RIGHT", configFrame, "TOPRIGHT", -16, -44)
+    -- Version: centered, smaller, darker gold
+    local hdrVersion = configFrame:CreateFontString(nil, "OVERLAY")
+    hdrVersion:SetFont(FONT_FACE, 11, FONT_FLAGS)
+    hdrVersion:SetShadowOffset(1, -1)
+    hdrVersion:SetShadowColor(0, 0, 0, 1)
+    hdrVersion:SetPoint("CENTER", configFrame, "TOP", 0, -68)
+    hdrVersion:SetJustifyH("CENTER")
+    hdrVersion:SetText("|cFFAA8800v" .. LOXX_VERSION .. "|r")
 
     -- Vertical divider (decorative only)
     local columnBgLeft = configFrame:CreateTexture(nil, "BACKGROUND", nil, -2)
@@ -2025,7 +2096,7 @@ local function CreateConfigPanel()
 
     -- ── LEFT COLUMN ─────────────────────────────────────────────
     local yL = -102
-    SectionLabelL("DISPLAY", yL)
+    SectionLabelL(L["SEC_DISPLAY"], yL)
     yL = yL - 32
 
     local alphaSlider = MakeSlider("LOXX_Slider_alpha", configFrame)
@@ -2035,13 +2106,13 @@ local function CreateConfigPanel()
     alphaSlider:SetValueStep(0.05)
     alphaSlider:SetObeyStepOnDrag(true)
     alphaSlider:SetValue(db.alpha)
-    alphaSlider.Text:SetText("Opacity: " .. string.format("%.0f%%", (db.alpha or 0.9) * 100))
+    alphaSlider.Text:SetText(string.format(L["SL_OPACITY"], (db.alpha or 0.9) * 100))
     alphaSlider.Low:SetText("30%")
     alphaSlider.High:SetText("100%")
     alphaSlider:SetScript("OnValueChanged", function(self, value)
         value = math.floor(value * 20 + 0.5) / 20
         db.alpha = value
-        self.Text:SetText("Opacity: " .. string.format("%.0f%%", value * 100))
+        self.Text:SetText(string.format(L["SL_OPACITY"], value * 100))
         if mainFrame then mainFrame:SetAlpha(value) end
     end)
 
@@ -2054,13 +2125,13 @@ local function CreateConfigPanel()
     widthSlider:SetValueStep(10)
     widthSlider:SetObeyStepOnDrag(true)
     widthSlider:SetValue(initW)
-    widthSlider.Text:SetText("Width: " .. tostring(initW) .. "px")
+    widthSlider.Text:SetText(string.format(L["SL_WIDTH"], initW))
     widthSlider.Low:SetText("120")
     widthSlider.High:SetText("400")
     widthSlider:SetScript("OnValueChanged", function(self, value)
         value = math.floor(value / 10 + 0.5) * 10
         db.frameWidth = value
-        self.Text:SetText("Width: " .. tostring(value) .. "px")
+        self.Text:SetText(string.format(L["SL_WIDTH"], value))
         RebuildBars()
     end)
 
@@ -2073,32 +2144,32 @@ local function CreateConfigPanel()
     heightSlider:SetValueStep(1)
     heightSlider:SetObeyStepOnDrag(true)
     heightSlider:SetValue(initH)
-    heightSlider.Text:SetText("Height: " .. tostring(initH) .. "px")
+    heightSlider.Text:SetText(string.format(L["SL_HEIGHT"], initH))
     heightSlider.Low:SetText("14")
     heightSlider.High:SetText("50")
     heightSlider:SetScript("OnValueChanged", function(self, value)
         value = math.floor(value + 0.5)
         db.barHeight = value
-        self.Text:SetText("Height: " .. tostring(value) .. "px")
+        self.Text:SetText(string.format(L["SL_HEIGHT"], value))
         RebuildBars()
     end)
 
     -- OPTIONS
     yL = yL - 48
-    SectionLabelL("OPTIONS", yL)
+    SectionLabelL(L["SEC_OPTIONS"], yL)
     yL = yL - 30
-    CreateCheckbox(configFrame, "Show Title", L_CBX1, yL, "showTitle")
+    CreateCheckbox(configFrame, L["CB_SHOW_TITLE"], L_CBX1, yL, "showTitle")
     yL = yL - 32
-    CreateCheckbox(configFrame, "Lock Position", L_CBX1, yL, "locked")
-    CreateCheckbox(configFrame, "Show READY", L_CBX2, yL, "showReady")
+    CreateCheckbox(configFrame, L["CB_LOCK_POS"], L_CBX1, yL, "locked")
+    CreateCheckbox(configFrame, L["CB_SHOW_READY"], L_CBX2, yL, "showReady")
     yL = yL - 28
-    CreateCheckbox(configFrame, "Show 'X kicks ready' bar", L_CBX1, yL, "showKicksReadyBar", UpdateDisplay)
+    CreateCheckbox(configFrame, L["CB_KICKS_BAR"], L_CBX1, yL, "showKicksReadyBar", UpdateDisplay)
     yL = yL - 28
     do
         local cb = CreateFrame("CheckButton", nil, configFrame, "UICheckButtonTemplate")
         cb:SetPoint("TOPLEFT", L_CBX1, yL)
         local cbLabel = cb.text or cb.Text
-        if cbLabel then cbLabel:SetText("Hide out of combat") end
+        if cbLabel then cbLabel:SetText(L["CB_HIDE_OOC"]) end
         cb:SetChecked(db.hideOutOfCombat)
         cb:SetScript("OnClick", function(self)
             db.hideOutOfCombat = self:GetChecked() and true or false
@@ -2108,7 +2179,7 @@ local function CreateConfigPanel()
 
     -- FONT SIZES
     yL = yL - 48
-    SectionLabelL("APPEARANCE", yL)
+    SectionLabelL(L["SEC_APPEARANCE"], yL)
     yL = yL - 28
     local initNameFont = math.max(2, db.nameFontSize or 12)
     local nameSlider = MakeSlider("LOXX_Slider_nameFont", configFrame)
@@ -2118,13 +2189,13 @@ local function CreateConfigPanel()
     nameSlider:SetValueStep(1)
     nameSlider:SetObeyStepOnDrag(true)
     nameSlider:SetValue(initNameFont)
-    nameSlider.Text:SetText("Name Size: " .. tostring(initNameFont))
+    nameSlider.Text:SetText(string.format(L["SL_NAME_SIZE"], initNameFont))
     nameSlider.Low:SetText("2")
     nameSlider.High:SetText("32")
     nameSlider:SetScript("OnValueChanged", function(self, value)
         value = math.floor(value + 0.5)
         db.nameFontSize = value
-        self.Text:SetText("Name Size: " .. tostring(value))
+        self.Text:SetText(string.format(L["SL_NAME_SIZE"], value))
         RebuildBars()
     end)
 
@@ -2137,13 +2208,13 @@ local function CreateConfigPanel()
     cdSlider:SetValueStep(1)
     cdSlider:SetObeyStepOnDrag(true)
     cdSlider:SetValue(initCdFont)
-    cdSlider.Text:SetText("CD Size: " .. tostring(initCdFont))
+    cdSlider.Text:SetText(string.format(L["SL_CD_SIZE"], initCdFont))
     cdSlider.Low:SetText("2")
     cdSlider.High:SetText("32")
     cdSlider:SetScript("OnValueChanged", function(self, value)
         value = math.floor(value + 0.5)
         db.readyFontSize = value
-        self.Text:SetText("CD Size: " .. tostring(value))
+        self.Text:SetText(string.format(L["SL_CD_SIZE"], value))
         RebuildBars()
     end)
 
@@ -2156,13 +2227,13 @@ local function CreateConfigPanel()
     readySlider:SetValueStep(1)
     readySlider:SetObeyStepOnDrag(true)
     readySlider:SetValue(initReadyFont)
-    readySlider.Text:SetText("Ready Size: " .. tostring(initReadyFont))
+    readySlider.Text:SetText(string.format(L["SL_READY_SIZE"], initReadyFont))
     readySlider.Low:SetText("2")
     readySlider.High:SetText("32")
     readySlider:SetScript("OnValueChanged", function(self, value)
         value = math.floor(value + 0.5)
         db.readyTextSize = value
-        self.Text:SetText("Ready Size: " .. tostring(value))
+        self.Text:SetText(string.format(L["SL_READY_SIZE"], value))
         RebuildBars()
     end)
 
@@ -2180,7 +2251,7 @@ local function CreateConfigPanel()
             ApplyFontPreset()
             RebuildBars()
         end,
-        "Font: "
+        L["DD_FONT"]
     )
     RefreshFontLabel()
 
@@ -2196,7 +2267,7 @@ local function CreateConfigPanel()
             ApplyFontPreset()
             RebuildBars()
         end,
-        "Color: "
+        L["DD_COLOR"]
     )
     RefreshColorLabel()
 
@@ -2212,13 +2283,13 @@ local function CreateConfigPanel()
             ApplyTexturePreset()
             RebuildBars()
         end,
-        "Bar Texture: "
+        L["DD_BAR_TEXTURE"]
     )
     RefreshTextureLabel()
 
     -- ── RIGHT COLUMN ─────────────────────────────────────────────
     local yR = -102
-    SectionLabelR("SHOW IN", yR)
+    SectionLabelR(L["SEC_SHOW_IN"], yR)
     yR = yR - 30
     local function VisCheck(parent, label, x, y, key)
         local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
@@ -2232,14 +2303,14 @@ local function CreateConfigPanel()
         end)
         return cb
     end
-    VisCheck(configFrame, "Dungeons", R_CBX1, yR, "showInDungeon")
-    VisCheck(configFrame, "Arena", R_CBX2, yR, "showInArena")
+    VisCheck(configFrame, L["VIS_DUNGEONS"], R_CBX1, yR, "showInDungeon")
+    VisCheck(configFrame, L["VIS_ARENA"], R_CBX2, yR, "showInArena")
     yR = yR - 32
-    VisCheck(configFrame, "Open World", R_CBX1, yR, "showInOpenWorld")
+    VisCheck(configFrame, L["VIS_OPEN_WORLD"], R_CBX1, yR, "showInOpenWorld")
 
     -- SOUND
     yR = yR - 48
-    SectionLabelR("SOUND", yR)
+    SectionLabelR(L["SEC_SOUND"], yR)
     yR = yR - 30
     local function GetSoundPresetIndex()
         if not db.soundOnReady or not db.soundID then return 1 end
@@ -2266,24 +2337,24 @@ local function CreateConfigPanel()
                 db.soundID = nil
             end
         end,
-        "Sound: "
+        L["DD_SOUND"]
     )
     RefreshSoundLabel()
 
     -- UI
     yR = yR - 48
-    SectionLabelR("UI", yR)
+    SectionLabelR(L["SEC_UI"], yR)
     yR = yR - 30
-    CreateCheckbox(configFrame, "Tooltip on Hover", R_CBX1, yR, "showTooltip")
+    CreateCheckbox(configFrame, L["CB_TOOLTIP"], R_CBX1, yR, "showTooltip")
 
     -- ROTATION
     yR = yR - 52
-    SectionLabelR("ROTATION", yR)
+    SectionLabelR(L["SEC_ROTATION"], yR)
     yR = yR - 30
     local rotCb = CreateFrame("CheckButton", nil, configFrame, "UICheckButtonTemplate")
     rotCb:SetPoint("TOPLEFT", R_CBX1, yR)
     local rotLbl = rotCb.text or rotCb.Text
-    if rotLbl then rotLbl:SetText("Enable Rotation") end
+    if rotLbl then rotLbl:SetText(L["CB_ROTATION"]) end
     rotCb:SetChecked(db.rotationEnabled)
     rotCb:SetScript("OnClick", function(self)
         if ROTATION_MAINTENANCE then return end
@@ -2295,7 +2366,7 @@ local function CreateConfigPanel()
     local mgrBtn = CreateFrame("Button", nil, configFrame, "UIPanelButtonTemplate")
     mgrBtn:SetSize(150, 24)
     mgrBtn:SetPoint("TOPLEFT", R_CBX1, yR)
-    mgrBtn:SetText("Manage Kick Rotation")
+    mgrBtn:SetText(L["BTN_MANAGE_ROT"])
     mgrBtn:SetScript("OnClick", function()
         if ROTATION_MAINTENANCE then return end
         ShowRotationPanel()
@@ -2316,7 +2387,7 @@ local function CreateConfigPanel()
         rotBg:SetVertexColor(0.2, 0.2, 0.2, 0.75)
         local rotTxt = rotOverlay:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         rotTxt:SetPoint("TOP", mgrBtn, "BOTTOM", 0, -4)
-        rotTxt:SetText("|cFF888888Under Maintenance|r")
+        rotTxt:SetText("|cFF888888" .. L["ROT_MAINTENANCE"] .. "|r")
     end
 
     -- ── FOOTER ───────────────────────────────────────────────────
@@ -2345,13 +2416,13 @@ local function CreateConfigPanel()
     local changelogBtn = CreateFrame("Button", nil, footerButtons, "UIPanelButtonTemplate")
     changelogBtn:SetSize(110, 24)
     changelogBtn:SetPoint("RIGHT", footerButtons, "RIGHT", 0, 0)
-    changelogBtn:SetText("Changelog")
+    changelogBtn:SetText(L["BTN_CHANGELOG"])
     changelogBtn:SetScript("OnClick", function() ShowChangelogWindow() end)
 
     local savePosBtn = CreateFrame("Button", nil, footerButtons, "UIPanelButtonTemplate")
     savePosBtn:SetSize(120, 24)
     savePosBtn:SetPoint("RIGHT", changelogBtn, "LEFT", -10, 0)
-    savePosBtn:SetText("Save Position")
+    savePosBtn:SetText(L["BTN_SAVE_POS"])
     savePosBtn:SetScript("OnClick", function()
         local function toChat(msg)
             if ChatFrame1 and ChatFrame1.AddMessage then
@@ -2365,14 +2436,14 @@ local function CreateConfigPanel()
         end
         local ok, err = pcall(function()
             if not mainFrame then
-                toChat("|cFF00DDDD[LOXX]|r No frame available to save.")
+                toChat("|cFF00DDDD[LOXX]|r " .. L["POS_NO_FRAME"])
                 return
             end
             if LoxxSaveFramePosition(mainFrame) then
-                toChat("|cFF00DDDD[LOXX]|r |cFF44FF44Position saved!|r")
-                toCenter("LOXX: Position saved!")
+                toChat("|cFF00DDDD[LOXX]|r |cFF44FF44" .. L["POS_SAVED"] .. "|r")
+                toCenter("LOXX: " .. L["POS_SAVED"])
             else
-                toChat("|cFF00DDDD[LOXX]|r Frame hidden, cannot save position.")
+                toChat("|cFF00DDDD[LOXX]|r " .. L["POS_HIDDEN"])
             end
         end)
         if not ok and err then
@@ -2384,7 +2455,7 @@ local function CreateConfigPanel()
     local statsBtn = CreateFrame("Button", nil, footerButtons, "UIPanelButtonTemplate")
     statsBtn:SetSize(120, 24)
     statsBtn:SetPoint("RIGHT", savePosBtn, "LEFT", -10, 0)
-    statsBtn:SetText("Run Stats")
+    statsBtn:SetText(L["BTN_RUN_STATS"])
     if statsBtn.GetFontString and statsBtn:GetFontString() then
         statsBtn:GetFontString():SetTextColor(1, 0.82, 0)
     end
@@ -2393,7 +2464,7 @@ local function CreateConfigPanel()
     local commandsBtn = CreateFrame("Button", nil, footerButtons, "UIPanelButtonTemplate")
     commandsBtn:SetSize(110, 24)
     commandsBtn:SetPoint("RIGHT", statsBtn, "LEFT", -10, 0)
-    commandsBtn:SetText("Commands")
+    commandsBtn:SetText(L["BTN_COMMANDS"])
     commandsBtn:SetScript("OnClick", function()
         if SlashCmdList and SlashCmdList["LOXX"] then
             SlashCmdList["LOXX"]("help")
@@ -2472,7 +2543,7 @@ local function CreateUI()
     titleText:SetHeight(16)
     titleText:SetJustifyH("LEFT")
     titleText:SetJustifyV("MIDDLE")
-    titleText:SetText("|cFFFFD100Interrupts|r")
+    titleText:SetText("|cFFFFD100" .. L["TITLE"] .. "|r")
     if not db.showTitle then titleText:Hide() end
 
 
@@ -2506,7 +2577,7 @@ local function CreateUI()
     noKickLabel:SetPoint("RIGHT", mainFrame, "RIGHT", -8, 0)
     noKickLabel:SetJustifyH("CENTER")
     noKickLabel:SetJustifyV("MIDDLE")
-    noKickLabel:SetText("|cFF888888No kick available|r")
+    noKickLabel:SetText("|cFF888888" .. L["NO_KICK"] .. "|r")
     noKickLabel:Hide()
     mainFrame.noKickLabel = noKickLabel
 
@@ -2537,17 +2608,22 @@ local function SetupSlash()
             CreateConfigPanel()
         elseif cmd == "lock" then
             db.locked = true
-            print("|cFF00DDDD[LOXX]|r Locked")
+            print("|cFF00DDDD[LOXX]|r " .. L["CMD_LOCKED"])
         elseif cmd == "unlock" then
             db.locked = false
-            print("|cFF00DDDD[LOXX]|r Unlocked")
+            print("|cFF00DDDD[LOXX]|r " .. L["CMD_UNLOCKED"])
         elseif cmd == "test" then
             if testMode then
                 -- Stop test
                 testMode = false
                 if testTicker then testTicker:Cancel() testTicker = nil end
                 partyAddonUsers = {}
-                print("|cFF00DDDD[LOXX]|r Test mode |cFFFF4444OFF|r")
+                -- Clear fake test run so it doesn't pollute real history
+                if loxxCurrentRun and loxxCurrentRun.instanceID == -1 then
+                    loxxCurrentRun = nil
+                end
+                SetDisplayDirty()
+                print("|cFF00DDDD[LOXX]|r " .. L["CMD_TEST_OFF"])
             else
                 -- Start test with fake players
                 testMode = true
@@ -2556,17 +2632,31 @@ local function SetupSlash()
                     ["Jainalee"] = { class = "MAGE", spellID = 2139, baseCd = 20, cdEnd = 0 },
                     ["Sylvanash"] = { class = "ROGUE", spellID = 1766, baseCd = 15, cdEnd = 0 },
                 }
-                -- Simulate random kicks
+                SetDisplayDirty()
+                -- Create a fake run so stats window shows live data during tests
+                loxxCurrentRun = {
+                    dungeon = "Test Dungeon",
+                    instanceID = -1,
+                    instanceType = "party",
+                    keyLevel = 10,
+                    date = date("%Y-%m-%d %H:%M"),
+                    startTime = GetTime(),
+                    players = {},
+                }
+                -- Simulate random kicks (also records to fake run)
                 testTicker = C_Timer.NewTicker(2, function()
                     if not testMode then return end
                     for name, info in pairs(partyAddonUsers) do
                         local now = GetTime()
                         if info.cdEnd < now and math.random() < 0.3 then
                             info.cdEnd = now + info.baseCd
+                            if loxxCurrentRun then
+                                loxxCurrentRun.players[name] = (loxxCurrentRun.players[name] or 0) + 1
+                            end
                         end
                     end
                 end)
-                print("|cFF00DDDD[LOXX]|r Test mode |cFF00FF00ON|r - 3 fake players. /loxx test to stop.")
+                print("|cFF00DDDD[LOXX]|r " .. L["CMD_TEST_ON"])
             end
         elseif cmd == "ping" then
             print("|cFF00DDDD[LOXX]|r === PING ===")
@@ -2635,9 +2725,14 @@ local function SetupSlash()
             end
         elseif cmd == "stats" then
             ShowStatsWindow()
+        elseif cmd == "stats clear" then
+            LOXXSavedVars.loxxRunHistory = {}
+            if loxxCurrentRun and loxxCurrentRun.instanceID ~= -1 then loxxCurrentRun = nil end
+            if statsFrame then statsFrame:Hide(); statsFrame = nil end
+            print("|cFF00DDDD[LOXX]|r " .. L["CMD_HIST_CLEAR"])
         elseif cmd == "logs" or cmd == "log" then
             if #loxxErrorLog == 0 then
-                print("|cFF00DDDD[LOXX]|r No errors recorded.")
+                print("|cFF00DDDD[LOXX]|r " .. L["CMD_NO_LOGS"])
             else
                 print("|cFF00DDDD[LOXX]|r === Recent errors (" .. #loxxErrorLog .. ") ===")
                 for i = 1, math.min(20, #loxxErrorLog) do
@@ -2650,9 +2745,9 @@ local function SetupSlash()
         elseif cmd == "logs clear" or cmd == "log clear" then
             loxxErrorLog = {}
             if LOXXSavedVars then LOXXSavedVars.loxxErrorLog = {} end
-            print("|cFF00DDDD[LOXX]|r Error log cleared.")
+            print("|cFF00DDDD[LOXX]|r " .. L["CMD_LOG_CLEAR"])
         elseif cmd == "help" then
-            print("|cFF00DDDD[LOXX]|r /loxx, /loxx config|options|settings, show, hide, lock, unlock, test, stats, logs, logs clear, ping, spy, pos, debug, help")
+            print("|cFF00DDDD[LOXX]|r /loxx, /loxx config|options|settings, show, hide, lock, unlock, test, stats, stats clear, logs, logs clear, ping, spy, pos, debug, help")
         else
             -- Default: open config
             CreateConfigPanel()
@@ -2663,14 +2758,26 @@ end
 ------------------------------------------------------------
 -- Run statistics
 ------------------------------------------------------------
-local function StartNewRun()
-    if loxxCurrentRun and next(loxxCurrentRun.players) then
-        LOXXSavedVars.loxxRunHistory = LOXXSavedVars.loxxRunHistory or {}
-        table.insert(LOXXSavedVars.loxxRunHistory, 1, loxxCurrentRun)
-        while #LOXXSavedVars.loxxRunHistory > 50 do
-            table.remove(LOXXSavedVars.loxxRunHistory)
-        end
+local function ArchiveCurrentRun()
+    if not (loxxCurrentRun and next(loxxCurrentRun.players)) then return end
+    if loxxCurrentRun.startTime then
+        loxxCurrentRun.duration = math.floor(GetTime() - loxxCurrentRun.startTime)
+        loxxCurrentRun.startTime = nil  -- don't persist the raw timestamp
     end
+    LOXXSavedVars.loxxRunHistory = LOXXSavedVars.loxxRunHistory or {}
+    -- Avoid double-archiving the same run (instanceID + date match)
+    local top = LOXXSavedVars.loxxRunHistory[1]
+    if top and top.instanceID == loxxCurrentRun.instanceID and top.date == loxxCurrentRun.date then
+        return
+    end
+    table.insert(LOXXSavedVars.loxxRunHistory, 1, loxxCurrentRun)
+    while #LOXXSavedVars.loxxRunHistory > 50 do
+        table.remove(LOXXSavedVars.loxxRunHistory)
+    end
+end
+
+local function StartNewRun()
+    ArchiveCurrentRun()
     local name, instanceType, _, _, _, _, _, instanceID = GetInstanceInfo()
     local keyLevel = 0
     if C_ChallengeMode and C_ChallengeMode.GetActiveKeystoneInfo then
@@ -2682,6 +2789,7 @@ local function StartNewRun()
         instanceType = instanceType,
         keyLevel     = keyLevel,
         date         = date("%Y-%m-%d %H:%M"),
+        startTime    = GetTime(),
         players      = {},
     }
 end
@@ -2718,7 +2826,46 @@ ShowStatsWindow = function()
     end
     if statsFrame then statsFrame = nil end
 
-    local SW, SH = 380, 500
+    local SW, SH = 380, 520
+
+    -- ── Helpers ──────────────────────────────────────────────────
+    local function FormatDuration(secs)
+        if not secs or secs <= 0 then return "" end
+        local m = math.floor(secs / 60)
+        local s = secs % 60
+        return m > 0 and string.format(" · %dm%02ds", m, s) or string.format(" · %ds", s)
+    end
+
+    local function SortedPlayers(players)
+        local t = {}
+        for n, k in pairs(players) do t[#t+1] = {name=n, kicks=k} end
+        table.sort(t, function(a, b) return a.kicks > b.kicks end)
+        return t
+    end
+
+    -- Aggregate kick totals across current run + all history
+    local function ComputeTotals()
+        local totals = {}
+        local runCount = 0
+        if loxxCurrentRun and next(loxxCurrentRun.players) then
+            runCount = runCount + 1
+            for name, kicks in pairs(loxxCurrentRun.players) do
+                totals[name] = (totals[name] or 0) + kicks
+            end
+        end
+        for _, run in ipairs(LOXXSavedVars.loxxRunHistory or {}) do
+            runCount = runCount + 1
+            for name, kicks in pairs(run.players) do
+                totals[name] = (totals[name] or 0) + kicks
+            end
+        end
+        local t = {}
+        for name, kicks in pairs(totals) do t[#t+1] = {name=name, kicks=kicks} end
+        table.sort(t, function(a, b) return a.kicks > b.kicks end)
+        return t, runCount
+    end
+
+    -- ── Frame ────────────────────────────────────────────────────
     local sf = CreateFrame("Frame", "LOXXStatsFrame", UIParent, "BasicFrameTemplate")
     sf:SetSize(SW, SH)
     if configFrame then
@@ -2735,13 +2882,13 @@ ShowStatsWindow = function()
     sf:SetFrameStrata("DIALOG")
     if sf.TitleText then sf.TitleText:SetText("") end
 
-    -- Header (same styling as the Changelog frame)
+    -- ── Header: Option C (warm dark, flanking gold lines) ────────
     local hdr = sf:CreateTexture(nil, "BACKGROUND", nil, 2)
     hdr:SetTexture(FLAT_TEX)
     hdr:SetVertexColor(0.12, 0.09, 0.02, 1)
     hdr:SetPoint("TOPLEFT",  0, -22)
     hdr:SetPoint("TOPRIGHT", 0, -22)
-    hdr:SetHeight(52)
+    hdr:SetHeight(64)
     local hdrLineTop = sf:CreateTexture(nil, "BORDER")
     hdrLineTop:SetTexture(FLAT_TEX)
     hdrLineTop:SetVertexColor(0.87, 0.73, 0.37, 0.75)
@@ -2751,21 +2898,59 @@ ShowStatsWindow = function()
     local hdrLineBot = sf:CreateTexture(nil, "BORDER")
     hdrLineBot:SetTexture(FLAT_TEX)
     hdrLineBot:SetVertexColor(0.87, 0.73, 0.37, 0.75)
-    hdrLineBot:SetPoint("TOPLEFT",  0, -74)
-    hdrLineBot:SetPoint("TOPRIGHT", 0, -74)
+    hdrLineBot:SetPoint("TOPLEFT",  0, -86)
+    hdrLineBot:SetPoint("TOPRIGHT", 0, -86)
     hdrLineBot:SetHeight(1)
     local hdrTitle = sf:CreateFontString(nil, "OVERLAY")
     hdrTitle:SetFont(FONT_FACE, 22, FONT_FLAGS)
     hdrTitle:SetShadowOffset(2, -2)
     hdrTitle:SetShadowColor(0, 0, 0, 1)
-    hdrTitle:SetPoint("TOP", 0, -34)
+    hdrTitle:SetPoint("CENTER", sf, "TOP", 0, -44)
     hdrTitle:SetJustifyH("CENTER")
-    hdrTitle:SetText("|cFFFFD100Interrupt Statistics|r")
+    hdrTitle:SetText("|cFFFFD100" .. L["STATS_TITLE"] .. "|r")
+    local hdrLineL = sf:CreateTexture(nil, "ARTWORK")
+    hdrLineL:SetTexture(FLAT_TEX)
+    hdrLineL:SetHeight(1)
+    hdrLineL:SetVertexColor(0.87, 0.73, 0.37, 0.55)
+    hdrLineL:SetPoint("LEFT",  sf, "TOPLEFT", 16, -44)
+    hdrLineL:SetPoint("RIGHT", hdrTitle, "LEFT", -10, 0)
+    local hdrLineR = sf:CreateTexture(nil, "ARTWORK")
+    hdrLineR:SetTexture(FLAT_TEX)
+    hdrLineR:SetHeight(1)
+    hdrLineR:SetVertexColor(0.87, 0.73, 0.37, 0.55)
+    hdrLineR:SetPoint("LEFT",  hdrTitle, "RIGHT", 10, 0)
+    hdrLineR:SetPoint("RIGHT", sf, "TOPRIGHT", -16, -44)
 
-    -- ScrollFrame (mirrors the Changelog layout)
+    -- ── Footer with "Clear All" button ───────────────────────────
+    local footerBand = sf:CreateTexture(nil, "BACKGROUND", nil, 1)
+    footerBand:SetTexture(FLAT_TEX)
+    footerBand:SetVertexColor(0.08, 0.06, 0.02, 1)
+    footerBand:SetPoint("BOTTOMLEFT",  sf, "BOTTOMLEFT",  0, 0)
+    footerBand:SetPoint("BOTTOMRIGHT", sf, "BOTTOMRIGHT", 0, 0)
+    footerBand:SetHeight(38)
+    local footerLine = sf:CreateTexture(nil, "BORDER")
+    footerLine:SetTexture(FLAT_TEX)
+    footerLine:SetVertexColor(0.87, 0.73, 0.37, 0.5)
+    footerLine:SetPoint("BOTTOMLEFT",  sf, "BOTTOMLEFT",  0, 38)
+    footerLine:SetPoint("BOTTOMRIGHT", sf, "BOTTOMRIGHT", 0, 38)
+    footerLine:SetHeight(1)
+    local clearBtn = CreateFrame("Button", nil, sf, "UIPanelButtonTemplate")
+    clearBtn:SetSize(100, 22)
+    clearBtn:SetPoint("CENTER", sf, "BOTTOM", 0, 19)
+    clearBtn:SetText(L["STATS_CLEAR"])
+    if clearBtn.GetFontString and clearBtn:GetFontString() then
+        clearBtn:GetFontString():SetTextColor(1, 0.4, 0.4)
+    end
+    clearBtn:SetScript("OnClick", function()
+        LOXXSavedVars.loxxRunHistory = {}
+        if loxxCurrentRun and loxxCurrentRun.instanceID ~= -1 then loxxCurrentRun = nil end
+        sf:Hide() ; statsFrame = nil ; ShowStatsWindow()
+    end)
+
+    -- ── Scroll content ───────────────────────────────────────────
     local scroll = CreateFrame("ScrollFrame", nil, sf, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 16, -80)
-    scroll:SetPoint("BOTTOMRIGHT", -32, 40)
+    scroll:SetPoint("TOPLEFT",     16, -90)
+    scroll:SetPoint("BOTTOMRIGHT", -32, 42)
 
     local content = CreateFrame("Frame", nil, scroll)
     content:SetSize(SW - 60, 100)
@@ -2787,44 +2972,55 @@ ShowStatsWindow = function()
         s:SetHeight(1)
         y = y - 12
     end
-    local function SortedPlayers(players)
-        local t = {}
-        for n, k in pairs(players) do t[#t+1] = {name=n, kicks=k} end
-        table.sort(t, function(a, b) return a.kicks > b.kicks end)
-        return t
-    end
 
     local renderedSomething = false
 
-    -- Current run
-    if loxxCurrentRun then
+    -- ── Section Totaux ───────────────────────────────────────────
+    local totals, runCount = ComputeTotals()
+    if #totals > 0 then
         renderedSomething = true
-        AddLine("|cFF00DDDDCurrent Run|r", 0, "GameFontNormal") ; y = y - 18
-        local keyStr = loxxCurrentRun.keyLevel and loxxCurrentRun.keyLevel > 0 and (" [+" .. loxxCurrentRun.keyLevel .. "]") or ""
-        AddLine("|cFFFFD100" .. (loxxCurrentRun.dungeon or "?") .. keyStr .. "|r  " .. (loxxCurrentRun.date or ""), 0)
-        y = y - 16
-        if loxxCurrentRun.players and next(loxxCurrentRun.players) then
-            for _, row in ipairs(SortedPlayers(loxxCurrentRun.players)) do
-                AddLine("  " .. row.name .. " — " .. row.kicks .. " kick" .. (row.kicks ~= 1 and "s" or ""), 8)
-                y = y - 14
-            end
-        else
-            AddLine("|cFF888888No interrupts recorded yet in this run.|r", 8)
+        AddLine("|cFF00DDDD" .. string.format(L["STATS_ALLTIME"], runCount, (runCount ~= 1 and L["STATS_RUNS"] or L["STATS_RUN"])) .. "|r", 0, "GameFontNormal")
+        y = y - 18
+        local medals = { "|cFFFFD100#1|r ", "|cFFCCCCCC#2|r ", "|cFFAA7744#3|r " }
+        for rank, row in ipairs(totals) do
+            local prefix = medals[rank] or "   "
+            AddLine(prefix .. row.name .. " — " .. row.kicks .. " " .. (row.kicks ~= 1 and L["STATS_KICKS"] or L["STATS_KICK"]), 8)
             y = y - 14
         end
         y = y - 8
     end
 
-    -- History
+    -- ── Section Run courant ──────────────────────────────────────
+    if loxxCurrentRun then
+        renderedSomething = true
+        if #totals > 0 then AddSep() end
+        AddLine("|cFF00DDDD" .. L["STATS_CURRENT"] .. "|r", 0, "GameFontNormal") ; y = y - 18
+        local keyStr = (loxxCurrentRun.keyLevel or 0) > 0 and (" [+" .. loxxCurrentRun.keyLevel .. "]") or ""
+        AddLine("|cFFFFD100" .. (loxxCurrentRun.dungeon or "?") .. keyStr .. "|r  |cFF888888" .. (loxxCurrentRun.date or "") .. "|r", 0)
+        y = y - 16
+        if loxxCurrentRun.players and next(loxxCurrentRun.players) then
+            for _, row in ipairs(SortedPlayers(loxxCurrentRun.players)) do
+                AddLine("  " .. row.name .. " — " .. row.kicks .. " " .. (row.kicks ~= 1 and L["STATS_KICKS"] or L["STATS_KICK"]), 8)
+                y = y - 14
+            end
+        else
+            AddLine("|cFF888888" .. L["STATS_NO_KICKS"] .. "|r", 8)
+            y = y - 14
+        end
+        y = y - 8
+    end
+
+    -- ── Section Historique ───────────────────────────────────────
     local runs = LOXXSavedVars.loxxRunHistory or {}
     if #runs > 0 then
         renderedSomething = true
         AddSep()
-        AddLine("|cFFFFD100History|r", 0, "GameFontNormal") ; y = y - 20
+        AddLine("|cFFFFD100" .. string.format(L["STATS_HISTORY"], #runs) .. "|r", 0, "GameFontNormal") ; y = y - 20
         for i, run in ipairs(runs) do
-            local keyStr = run.keyLevel > 0 and (" [+" .. run.keyLevel .. "]") or ""
-            AddLine("|cFFFFCC00" .. (run.dungeon or "?") .. keyStr .. "|r  " .. (run.date or ""), 0)
-            -- Delete button (small X)
+            local keyStr = (run.keyLevel or 0) > 0 and (" [+" .. run.keyLevel .. "]") or ""
+            local durStr = FormatDuration(run.duration)
+            AddLine("|cFFFFCC00" .. (run.dungeon or "?") .. keyStr .. "|r  |cFF888888" .. (run.date or "") .. durStr .. "|r", 0)
+            -- Delete (×) button
             local delBtn = CreateFrame("Button", nil, content)
             delBtn:SetSize(16, 14)
             delBtn:SetPoint("TOPRIGHT", -4, y + 2)
@@ -2837,7 +3033,7 @@ ShowStatsWindow = function()
             end)
             y = y - 16
             for _, row in ipairs(SortedPlayers(run.players)) do
-                AddLine("  " .. row.name .. " — " .. row.kicks .. " kick" .. (row.kicks ~= 1 and "s" or ""), 8)
+                AddLine("  " .. row.name .. " — " .. row.kicks .. " " .. (row.kicks ~= 1 and L["STATS_KICKS"] or L["STATS_KICK"]), 8)
                 y = y - 14
             end
             y = y - 8
@@ -2845,16 +3041,15 @@ ShowStatsWindow = function()
     end
 
     if not renderedSomething then
-        AddLine("|cFFFFD100No stats yet|r", 0, "GameFontNormal")
+        AddLine("|cFFFFD100" .. L["STATS_EMPTY"] .. "|r", 0, "GameFontNormal")
         y = y - 20
-        AddLine("|cFFBBBBBBStart a dungeon/arena and interrupt casts to record data.|r", 0)
+        AddLine("|cFFBBBBBB" .. L["STATS_HINT"] .. "|r", 0)
         y = y - 16
-        AddLine("|cFF888888Tip: use /loxx test to quickly validate display behavior.|r", 0)
+        AddLine("|cFF888888" .. L["STATS_TIP"] .. "|r", 0)
         y = y - 14
     end
 
     content:SetHeight(math.max(120, math.abs(y) + 20))
-
     sf:Show()
 end
 
@@ -2967,11 +3162,11 @@ ShowRotationPanel = function()
         hdrTitle:SetShadowColor(0, 0, 0, 1)
         hdrTitle:SetPoint("TOP", 0, -34)
         hdrTitle:SetJustifyH("CENTER")
-        hdrTitle:SetText("|cFFFFD100Kick Rotation|r")
+        hdrTitle:SetText("|cFFFFD100" .. L["ROT_TITLE"] .. "|r")
 
         -- Permanent bottom buttons
         local resetBtn = CreateFrame("Button", nil, rotationPanel, "UIPanelButtonTemplate")
-        resetBtn:SetSize(80, 22) ; resetBtn:SetPoint("BOTTOMLEFT", 8, 8) ; resetBtn:SetText("Reset")
+        resetBtn:SetSize(80, 22) ; resetBtn:SetPoint("BOTTOMLEFT", 8, 8) ; resetBtn:SetText(L["ROT_RESET"])
         resetBtn:SetScript("OnClick", function()
             rotationOrder = {} ; rotationIndex = 1
             if LOXXSavedVars then
@@ -2981,14 +3176,14 @@ ShowRotationPanel = function()
             BuildRotationPanel()
         end)
         local syncBtn = CreateFrame("Button", nil, rotationPanel, "UIPanelButtonTemplate")
-        syncBtn:SetSize(80, 22) ; syncBtn:SetPoint("BOTTOMRIGHT", -8, 8) ; syncBtn:SetText("Sync Party")
+        syncBtn:SetSize(80, 22) ; syncBtn:SetPoint("BOTTOMRIGHT", -8, 8) ; syncBtn:SetText(L["ROT_SYNC"])
         syncBtn:SetScript("OnClick", function()
             if LOXXSavedVars then
                 LOXXSavedVars.rotationOrder = rotationOrder
                 LOXXSavedVars.rotationIndex = rotationIndex
             end
             BroadcastRotation()
-            print("|cFF00DDDD[LOXX]|r Rotation synced to party.")
+            print("|cFF00DDDD[LOXX]|r " .. L["ROT_SYNCED"])
         end)
     end
     BuildRotationPanel()
@@ -3412,28 +3607,17 @@ mobInterruptFrame:SetScript("OnEvent", function(self, event, unit)
     OnMobInterrupted(unit)
 end)
 
--- Nameplate interrupt tracking: one frame per nameplate
+-- Nameplate interrupt tracking: pre-create all 40 frames at load time (no leaks)
+-- Avoids creating/destroying frames during gameplay, which was inefficient.
 local nameplateCastFrames = {}
-local nameplateFrame = CreateFrame("Frame")
-nameplateFrame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
-nameplateFrame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
-nameplateFrame:SetScript("OnEvent", function(self, event, unit)
-    if event == "NAME_PLATE_UNIT_ADDED" then
-        if not nameplateCastFrames[unit] then
-            nameplateCastFrames[unit] = CreateFrame("Frame")
-        end
-        local f = nameplateCastFrames[unit]
-        f:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", unit)
-        f:SetScript("OnEvent", function(_, _, eUnit)
-            OnMobInterrupted(eUnit)
-        end)
-    elseif event == "NAME_PLATE_UNIT_REMOVED" then
-        if nameplateCastFrames[unit] then
-            nameplateCastFrames[unit]:UnregisterAllEvents()
-            nameplateCastFrames[unit] = nil
-        end
-    end
-end)
+for i = 1, 40 do
+    local unit = "nameplate" .. i
+    nameplateCastFrames[unit] = CreateFrame("Frame")
+    nameplateCastFrames[unit]:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", unit)
+    nameplateCastFrames[unit]:SetScript("OnEvent", function(_, _, eUnit)
+        OnMobInterrupted(eUnit)
+    end)
+end
 
 -- Party event frames: OnValueChanged spell detection + time correlation
 RegisterPartyWatchers = function()
@@ -3521,6 +3705,7 @@ ef:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
             if not ok and spyMode then
                 print("|cFFFF0000[SPY]|r Inspect scan error: " .. tostring(err))
             end
+            SetDisplayDirty()  -- spec/talents may have changed kick or added extra kicks
             ClearInspectPlayer()
             inspectBusy = false
             inspectUnit = nil
@@ -3545,6 +3730,7 @@ ef:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
                             cdEnd = 0,
                             onKickReduction = nil,
                         }
+                        SetDisplayDirty()
                     end
                 end
                 if spyMode then
@@ -3589,6 +3775,7 @@ ef:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
                 if name and role == "HEALER" and cls ~= "SHAMAN" and partyAddonUsers[name] then
                     partyAddonUsers[name] = nil
                     noInterruptPlayers[name] = true
+                    SetDisplayDirty()
                     if spyMode then
                         print("|cFF00DDDD[SPY]|r Role changed: " .. name .. " is HEALER (" .. cls .. ") → removed")
                     end
@@ -3633,7 +3820,7 @@ ef:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
     elseif event == "CHALLENGE_MODE_START" then
         StartNewRun()
     elseif event == "PLAYER_LOGOUT" then
-        -- Persist frame position right before WoW saves variables
+        ArchiveCurrentRun()  -- persist current run even if no new run started
         if mainFrame then LoxxSaveFramePosition(mainFrame) end
     end
 end)
