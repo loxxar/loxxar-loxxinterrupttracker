@@ -15,30 +15,30 @@
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
 local LOXX_VERSION = "1.3.1.1"
-local LOXX_DB_VERSION = 4   -- bump when SavedVars schema changes
-local L = LoxxL or {}       -- localization table (set by localization.lua)
+local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
+local L = LoxxL or {}     -- localization table (set by localization.lua)
 
 ------------------------------------------------------------
 -- Spell data (multiple possible interrupts per class/spec)
 ------------------------------------------------------------
 local ALL_INTERRUPTS = {
-    [6552]   = { name = "Pummel",            cd = 15, icon = 132938 },
-    [1766]   = { name = "Kick",              cd = 15, icon = 132219 },
-    [2139]   = { name = "Counterspell",      cd = 24, icon = 135856 },
-    [57994]  = { name = "Wind Shear",        cd = 12, icon = 136018 },
-    [106839] = { name = "Skull Bash",        cd = 15, icon = 236946 },
-    [78675]  = { name = "Solar Beam",        cd = 60, icon = 236748 },
-    [47528]  = { name = "Mind Freeze",       cd = 15, icon = 237527 },
-    [96231]  = { name = "Rebuke",            cd = 15, icon = 523893 },
-    [183752] = { name = "Disrupt",           cd = 15, icon = 1305153 },
-    [116705] = { name = "Spear Hand Strike", cd = 15, icon = 608940 },
-    [147362] = { name = "Counter Shot",      cd = 24, icon = 249170 },
-    [187707] = { name = "Muzzle",            cd = 15, icon = 1376045 },
-    [19647]  = { name = "Spell Lock",        cd = 24, icon = 136174 },
-    [132409] = { name = "Spell Lock",        cd = 24, icon = 136174 },
-    [119914] = { name = "Axe Toss",          cd = 30, icon = "Interface\\Icons\\ability_warrior_titansgrip" },
-    [1276467] = { name = "Fel Ravager",      cd = 25, icon = "Interface\\Icons\\spell_shadow_summonfelhunter" },
-    [351338] = { name = "Quell",             cd = 20, icon = 4622469 },
+    [6552]    = { name = "Pummel", cd = 15, icon = 132938 },
+    [1766]    = { name = "Kick", cd = 15, icon = 132219 },
+    [2139]    = { name = "Counterspell", cd = 24, icon = 135856 },
+    [57994]   = { name = "Wind Shear", cd = 12, icon = 136018 },
+    [106839]  = { name = "Skull Bash", cd = 15, icon = 236946 },
+    [78675]   = { name = "Solar Beam", cd = 60, icon = 236748 },
+    [47528]   = { name = "Mind Freeze", cd = 15, icon = 237527 },
+    [96231]   = { name = "Rebuke", cd = 15, icon = 523893 },
+    [183752]  = { name = "Disrupt", cd = 15, icon = 1305153 },
+    [116705]  = { name = "Spear Hand Strike", cd = 15, icon = 608940 },
+    [147362]  = { name = "Counter Shot", cd = 24, icon = 249170 },
+    [187707]  = { name = "Muzzle", cd = 15, icon = 1376045 },
+    [19647]   = { name = "Spell Lock", cd = 24, icon = 136174 },
+    [132409]  = { name = "Spell Lock", cd = 24, icon = 136174 },
+    [119914]  = { name = "Axe Toss", cd = 30, icon = "Interface\\Icons\\ability_warrior_titansgrip" },
+    [1276467] = { name = "Fel Ravager", cd = 25, icon = "Interface\\Icons\\spell_shadow_summonfelhunter" },
+    [351338]  = { name = "Quell", cd = 20, icon = 4622469 },
 }
 
 -- Which spells to check per class (order matters: first found wins)
@@ -47,12 +47,12 @@ local CLASS_INTERRUPT_LIST = {
     ROGUE       = { 1766 },
     MAGE        = { 2139 },
     SHAMAN      = { 57994 },
-    DRUID       = { 106839, 78675 },           -- Skull Bash (feral/guardian), Solar Beam (balance)
+    DRUID       = { 106839, 78675 }, -- Skull Bash (feral/guardian), Solar Beam (balance)
     DEATHKNIGHT = { 47528 },
     PALADIN     = { 96231 },
     DEMONHUNTER = { 183752 },
     MONK        = { 116705 },
-    HUNTER      = { 147362, 187707 },           -- Counter Shot (BM/MM), Muzzle (survival)
+    HUNTER      = { 147362, 187707 }, -- Counter Shot (BM/MM), Muzzle (survival)
     WARLOCK     = { 19647, 132409, 119914 },
     EVOKER      = { 351338 },
 }
@@ -77,49 +77,49 @@ local CLASS_COLORS = {
 -- Defaults
 ------------------------------------------------------------
 local FONT_PRESETS = {
-    { label = "Default", font = nil },
+    { label = "Default",       font = nil },
     { label = "Friz Quadrata", font = "Fonts\\FRIZQT__.TTF" },
-    { label = "Morpheus", font = "Fonts\\MORPHEUS.TTF" },
-    { label = "Skurri", font = "Fonts\\SKURRI.TTF" },
-    { label = "Arial Narrow", font = "Fonts\\ARIALN.TTF" },
+    { label = "Morpheus",      font = "Fonts\\MORPHEUS.TTF" },
+    { label = "Skurri",        font = "Fonts\\SKURRI.TTF" },
+    { label = "Arial Narrow",  font = "Fonts\\ARIALN.TTF" },
 }
 
 local FONT_COLOR_PRESETS = {
-    { label = "White", color = {1, 1, 1} },
-    { label = "Amber", color = {1, 0.82, 0} },
-    { label = "Verdant", color = {0.2, 1, 0.2} },
-    { label = "Sky", color = {0.4, 0.8, 1} },
-    { label = "Carnelian", color = {1, 0.4, 0.4} },
+    { label = "White",     color = { 1, 1, 1 } },
+    { label = "Amber",     color = { 1, 0.82, 0 } },
+    { label = "Verdant",   color = { 0.2, 1, 0.2 } },
+    { label = "Sky",       color = { 0.4, 0.8, 1 } },
+    { label = "Carnelian", color = { 1, 0.4, 0.4 } },
 }
 
 local BAR_TEXTURE_PRESETS = {
     { label = "Classic", texture = "Interface\\BUTTONS\\WHITE8X8" },
-    { label = "Smooth", texture = "Interface\\TARGETINGFRAME\\UI-StatusBar" },
-    { label = "Raid", texture = "Interface\\RaidFrame\\Raid-Bar-Hp-Fill" },
-    { label = "Skills", texture = "Interface\\PaperDollInfoFrame\\UI-Character-Skills-Bar" },
+    { label = "Smooth",  texture = "Interface\\TARGETINGFRAME\\UI-StatusBar" },
+    { label = "Raid",    texture = "Interface\\RaidFrame\\Raid-Bar-Hp-Fill" },
+    { label = "Skills",  texture = "Interface\\PaperDollInfoFrame\\UI-Character-Skills-Bar" },
 }
 
 local DEFAULTS = {
-    frameWidth      = 180,  -- fixed — no auto-scaling
-    barHeight       = 20,   -- fixed — fits 12px font
-    locked          = false,
-    showTitle       = true,
-    alpha           = 0.9,
-    nameFontSize    = 12,
-    readyFontSize   = 12,
-    readyTextSize   = 12,
-    showReady       = true,
-    showInDungeon   = true,
-    showInOpenWorld = true,
-    showInArena     = false,
-    soundOnReady    = false,
-    soundID         = 8960,
-    showTooltip     = true,
-    hideOutOfCombat = false,
+    frameWidth        = 180, -- fixed — no auto-scaling
+    barHeight         = 20,  -- fixed — fits 12px font
+    locked            = false,
+    showTitle         = true,
+    alpha             = 0.9,
+    nameFontSize      = 12,
+    readyFontSize     = 12,
+    readyTextSize     = 12,
+    showReady         = true,
+    showInDungeon     = true,
+    showInOpenWorld   = true,
+    showInArena       = false,
+    soundOnReady      = false,
+    soundID           = 8960,
+    showTooltip       = true,
+    hideOutOfCombat   = false,
     showKicksReadyBar = true,
-    fontPreset      = 1,
-    fontColorPreset = 1,
-    barTexturePreset= 1,
+    fontPreset        = 1,
+    fontColorPreset   = 1,
+    barTexturePreset  = 1,
 }
 
 ------------------------------------------------------------
@@ -132,10 +132,10 @@ local function SK(key, fallback)
 end
 
 local SOUND_PRESETS = {
-    { label = "Disabled", id = nil },
-    { label = "Auction Bell", id = SK("AUCTION_WINDOW_OPEN", 3087) },
+    { label = "Disabled",       id = nil },
+    { label = "Auction Bell",   id = SK("AUCTION_WINDOW_OPEN", 3087) },
     { label = "Bell - Alarm 2", id = SK("ALARM_CLOCK_WARNING_2", 12890) },
-    { label = "Chime - Ready", id = SK("READY_CHECK", 8960) },
+    { label = "Chime - Ready",  id = SK("READY_CHECK", 8960) },
 }
 
 -- True dropdown-style control (Blizzard template) for preset lists
@@ -175,40 +175,40 @@ end
 local db
 local myClass, myName, mySpellID
 local myCachedCD
-local myBaseCd                  -- real base CD from spellbook (with talents)
-local myKickCdEnd = 0           -- clean tracking of our own kick CD
-local myIsPetSpell = false      -- is our primary kick a pet spell?
-local myExtraKicks = {}         -- extra kicks for own player {spellID → {baseCd, cdEnd}}
-local partyAddonUsers = {}
-local bars = {}
-local cachedPartyEntries = {}  -- reused table; rebuilt only when displayDirty=true
-local displayDirty       = true -- true = rebuild cachedPartyEntries from scratch next tick
-local playerWasOnCd      = false -- own kick: was on CD last tick (for sound-on-ready)
-local MAX_BARS        = 40   -- absolute cap (supports up to 40-man raids)
-local currentMaxBars  = 7    -- updated dynamically based on group size
+local myBaseCd                     -- real base CD from spellbook (with talents)
+local myKickCdEnd          = 0     -- clean tracking of our own kick CD
+local myIsPetSpell         = false -- is our primary kick a pet spell?
+local myExtraKicks         = {}    -- extra kicks for own player {spellID → {baseCd, cdEnd}}
+local partyAddonUsers      = {}
+local bars                 = {}
+local cachedPartyEntries   = {}    -- reused table; rebuilt only when displayDirty=true
+local displayDirty         = true  -- true = rebuild cachedPartyEntries from scratch next tick
+local playerWasOnCd        = false -- own kick: was on CD last tick (for sound-on-ready)
+local MAX_BARS             = 40    -- absolute cap (supports up to 40-man raids)
+local currentMaxBars       = 7     -- updated dynamically based on group size
 local mainFrame, titleText, configFrame
 local updateTicker
-local ready = false
-local lastAnnounce = 0
-local testMode = false
-local testTicker = nil
-local inCombat = false
-local spyMode = false
+local ready                = false
+local lastAnnounce         = 0
+local testMode             = false
+local testTicker           = nil
+local inCombat             = false
+local spyMode              = false
 -- Forward declarations: defined later in the stats block but called earlier
 local RecordKick
-local loxxCurrentRun  = nil   -- stats: current instance run
-local statsFrame      = nil   -- stats window
+local loxxCurrentRun       = nil -- stats: current instance run
+local statsFrame           = nil -- stats window
 -- Error log (in-memory, also persisted via SavedVars)
-local loxxErrorLog = {}
-local loxxDungeonLog = {}
+local loxxErrorLog         = {}
+local loxxDungeonLog       = {}
 local loxxDungeonLogActive = false
-local DUNGEON_LOG_MAX = 600
-local dungeonLogFrame = nil
-local loxxLastErr  = ""
-local loxxErrCount = 0
+local DUNGEON_LOG_MAX      = 600
+local dungeonLogFrame      = nil
+local loxxLastErr          = ""
+local loxxErrCount         = 0
 
 -- String-keyed version for laundered (still-tainted) spellID lookups
-local ALL_INTERRUPTS_STR = {}
+local ALL_INTERRUPTS_STR   = {}
 for id, data in pairs(ALL_INTERRUPTS) do
     ALL_INTERRUPTS_STR[tostring(id)] = data
 end
@@ -221,26 +221,26 @@ local CD_ON_KICK_TALENTS_STR   = {}
 local EXTRA_KICK_TALENTS_STR   = {}
 
 -- Class → primary interrupt mapping (for auto-detection when mob gets interrupted)
-local CLASS_INTERRUPTS = {
-    WARRIOR     = { id = 6552,   cd = 15, name = "Pummel" },
-    ROGUE       = { id = 1766,   cd = 15, name = "Kick" },
-    MAGE        = { id = 2139,   cd = 24, name = "Counterspell" },
-    SHAMAN      = { id = 57994,  cd = 12, name = "Wind Shear" },
+local CLASS_INTERRUPTS         = {
+    WARRIOR     = { id = 6552, cd = 15, name = "Pummel" },
+    ROGUE       = { id = 1766, cd = 15, name = "Kick" },
+    MAGE        = { id = 2139, cd = 24, name = "Counterspell" },
+    SHAMAN      = { id = 57994, cd = 12, name = "Wind Shear" },
     DRUID       = { id = 106839, cd = 15, name = "Skull Bash" },
-    DEATHKNIGHT = { id = 47528,  cd = 15, name = "Mind Freeze" },
-    PALADIN     = { id = 96231,  cd = 15, name = "Rebuke" },
+    DEATHKNIGHT = { id = 47528, cd = 15, name = "Mind Freeze" },
+    PALADIN     = { id = 96231, cd = 15, name = "Rebuke" },
     DEMONHUNTER = { id = 183752, cd = 15, name = "Disrupt" },
     HUNTER      = { id = 147362, cd = 24, name = "Counter Shot" },
     MONK        = { id = 116705, cd = 15, name = "Spear Hand Strike" },
-    WARLOCK     = { id = 19647,  cd = 24, name = "Spell Lock" },
+    WARLOCK     = { id = 19647, cd = 24, name = "Spell Lock" },
     EVOKER      = { id = 351338, cd = 20, name = "Quell" },
 }
 
 -- SpecID → interrupt override (when spec changes the interrupt or CD)
 local SPEC_INTERRUPT_OVERRIDES = {
-    [255]  = { id = 187707,  cd = 15, name = "Muzzle" },          -- Survival Hunter
-    [264]  = { id = 57994,   cd = 30, name = "Wind Shear" },      -- Restoration Shaman (30s vs 12s for Ele/Enh)
-    [266]  = { id = 119914,  cd = 30, name = "Axe Toss", isPet = true, petSpellID = 89766 },  -- Demonology Warlock (Felguard)
+    [255] = { id = 187707, cd = 15, name = "Muzzle" },                                     -- Survival Hunter
+    [264] = { id = 57994, cd = 30, name = "Wind Shear" },                                  -- Restoration Shaman (30s vs 12s for Ele/Enh)
+    [266] = { id = 119914, cd = 30, name = "Axe Toss", isPet = true, petSpellID = 89766 }, -- Demonology Warlock (Felguard)
 }
 
 local function GetClassKickInfo(cls, unit)
@@ -269,7 +269,7 @@ local SPEC_NO_INTERRUPT = {
 -- Talents that PERMANENTLY reduce interrupt cooldowns (scanned via inspect)
 local CD_REDUCTION_TALENTS = {
     -- Hunter: Lone Survivor - "Counter Shot and Muzzle CD reduced by 2 sec" (passive)
-    [388039] = { affects = 147362, reduction = 2,  name = "Lone Survivor" },
+    [388039] = { affects = 147362, reduction = 2, name = "Lone Survivor" },
     -- Evoker: Interwoven Threads - "All spell CDs reduced by 10%" (percentage)
     [412713] = { affects = 351338, pctReduction = 10, name = "Interwoven Threads" },
 }
@@ -287,32 +287,36 @@ local EXTRA_KICK_TALENTS = {
 
 -- Populate string-keyed talent tables (built after numeric tables are defined)
 for id, v in pairs(CD_REDUCTION_TALENTS) do CD_REDUCTION_TALENTS_STR[tostring(id)] = v end
-for id, v in pairs(CD_ON_KICK_TALENTS)   do CD_ON_KICK_TALENTS_STR[tostring(id)]   = v end
-for id, v in pairs(EXTRA_KICK_TALENTS)   do EXTRA_KICK_TALENTS_STR[tostring(id)]   = v end
+for id, v in pairs(CD_ON_KICK_TALENTS) do CD_ON_KICK_TALENTS_STR[tostring(id)] = v end
+for id, v in pairs(EXTRA_KICK_TALENTS) do EXTRA_KICK_TALENTS_STR[tostring(id)] = v end
 
 -- Specs that always have extra kicks
 local SPEC_EXTRA_KICKS = {
     [266] = {
-        { id = 132409, cd = 24, name = "Fel Ravager / Spell Lock",
-          icon = "Interface\\Icons\\spell_shadow_summonfelhunter",
-          talentCheck = 1276467 },  -- Check if Grimoire: Fel Ravager talent is known
+        {
+            id = 132409,
+            cd = 24,
+            name = "Fel Ravager / Spell Lock",
+            icon = "Interface\\Icons\\spell_shadow_summonfelhunter",
+            talentCheck = 1276467
+        }, -- Check if Grimoire: Fel Ravager talent is known
     },
 }
 
 -- Spell aliases: some spells fire different IDs on party vs own client
 -- e.g., Fel Ravager summon fires as 1276467 on party but 132409 on own
 local SPELL_ALIASES = {
-    [1276467] = 132409,  -- Fel Ravager summon → Spell Lock extra kick bar
-    [132409]  = 19647,   -- Command Demon: Spell Lock → primary Spell Lock bar (19647)
-    [89766]   = 119914,  -- Axe Toss pet spell (Felguard) → primary Axe Toss bar
-                         -- Note: Demo Warlock extra kick check still uses original spellID before alias
+    [1276467] = 132409, -- Fel Ravager summon → Spell Lock extra kick bar
+    [132409]  = 19647,  -- Command Demon: Spell Lock → primary Spell Lock bar (19647)
+    [89766]   = 119914, -- Axe Toss pet spell (Felguard) → primary Axe Toss bar
+    -- Note: Demo Warlock extra kick check still uses original spellID before alias
 }
 
 -- Inspect queue
 local inspectQueue = {}
 local inspectBusy = false
 local inspectUnit = nil
-local inspectedPlayers = {} -- name → true
+local inspectedPlayers = {}   -- name → true
 local noInterruptPlayers = {} -- name → true (healers etc. with no kick)
 
 
@@ -327,15 +331,15 @@ end
 local RegisterPartyWatchers
 
 -- Use the game's default font (supports all locales: Latin, Cyrillic, Korean, Chinese)
-local FONT_FACE = GameFontNormal and GameFontNormal:GetFont() or "Fonts\\FRIZQT__.TTF"
-local FONT_FLAGS  = "OUTLINE"
-local BAR_TEXTURE = "Interface\\BUTTONS\\WHITE8X8"
-local FLAT_TEX    = "Interface\\BUTTONS\\WHITE8X8"
-local FONT_COLOR = {1, 1, 1}
-local FONT_READY_COLOR = {0.2, 1.0, 0.2}
+local FONT_FACE        = GameFontNormal and GameFontNormal:GetFont() or "Fonts\\FRIZQT__.TTF"
+local FONT_FLAGS       = "OUTLINE"
+local BAR_TEXTURE      = "Interface\\BUTTONS\\WHITE8X8"
+local FLAT_TEX         = "Interface\\BUTTONS\\WHITE8X8"
+local FONT_COLOR       = { 1, 1, 1 }
+local FONT_READY_COLOR = { 0.2, 1.0, 0.2 }
 
 -- Locale-specific font fallbacks (if GameFontNormal not available at load time)
-local LOCALE_FONTS = {
+local LOCALE_FONTS     = {
     ["koKR"] = "Fonts\\2002.TTF",
     ["zhCN"] = "Fonts\\ARKai_T.TTF",
     ["zhTW"] = "Fonts\\blei00d.TTF",
@@ -349,14 +353,14 @@ local function LoxxLogError(msg)
     local ts = date("%H:%M:%S")
     if msg == loxxLastErr then
         loxxErrCount = loxxErrCount + 1
-        if loxxErrCount > 5 then return end  -- suppress storm of identical errors
+        if loxxErrCount > 5 then return end -- suppress storm of identical errors
         msg = msg .. " (x" .. loxxErrCount .. ")"
     else
         loxxLastErr  = msg
         loxxErrCount = 1
     end
     local entry = "[" .. ts .. "] " .. msg
-    table.insert(loxxErrorLog, 1, entry)   -- newest first
+    table.insert(loxxErrorLog, 1, entry) -- newest first
     while #loxxErrorLog > 50 do table.remove(loxxErrorLog) end
     if LOXXSavedVars then LOXXSavedVars.loxxErrorLog = loxxErrorLog end
 end
@@ -395,9 +399,9 @@ local function ApplyFontPreset()
     end
     local color = FONT_COLOR_PRESETS[db.fontColorPreset or 1]
     if color then
-        FONT_COLOR = {color.color[1], color.color[2], color.color[3]}
+        FONT_COLOR = { color.color[1], color.color[2], color.color[3] }
     else
-        FONT_COLOR = {1,1,1}
+        FONT_COLOR = { 1, 1, 1 }
     end
     FONT_READY_COLOR = {
         math.min(1, FONT_COLOR[1] * 0.7 + 0.3),
@@ -460,7 +464,13 @@ local function ReadMyBaseCd()
     if ok and ms then
         local clean = tonumber(string.format("%.0f", ms))
         if clean and clean > 0 then
-            myBaseCd = clean / 1000
+            local cd = clean / 1000
+            -- Ignore GCD values (< 5s) — GetSpellBaseCooldown can return 1500ms
+            -- (the GCD) instead of the real CD for some spells in Midnight 12.0.
+            -- No real interrupt has a base CD < 5s (shortest is Wind Shear at 12s).
+            if cd >= 5 then
+                myBaseCd = cd
+            end
         end
     end
     -- TryCacheCD gives actual observed CD (after all modifiers)
@@ -489,7 +499,8 @@ local function OnAddonMessage(prefix, message, channel, sender)
     if command == "PING" then
         local via = parts[2] or "unknown"
         local self_tag = (shortName == myName) and " |cFFFFFF00(SELF)|r" or ""
-        print("|cFF00DDDD[LOXX]|r Received PING from |cFF00FF00" .. shortName .. "|r channel=" .. tostring(channel) .. " tag=" .. via .. self_tag)
+        print("|cFF00DDDD[LOXX]|r Received PING from |cFF00FF00" ..
+            shortName .. "|r channel=" .. tostring(channel) .. " tag=" .. via .. self_tag)
         return
     end
 
@@ -505,7 +516,9 @@ local function OnAddonMessage(prefix, message, channel, sender)
             partyAddonUsers[shortName].class = cls
             partyAddonUsers[shortName].spellID = spellID
             partyAddonUsers[shortName].cdEnd = partyAddonUsers[shortName].cdEnd or 0
-            if baseCd and baseCd > 0 then
+            -- Guard against GCD-corrupted baseCd (< 5s) — same root cause as ReadMyBaseCd.
+            -- No real interrupt has a base CD under 5s (Wind Shear = 12s is the shortest).
+            if baseCd and baseCd >= 5 then
                 partyAddonUsers[shortName].baseCd = baseCd
             end
             SetDisplayDirty()
@@ -537,7 +550,11 @@ local function OnSpellCastSucceeded(unit, castGUID, spellID, isParty, cleanName)
                         ek.cdEnd = now + ek.baseCd
                         isExtra = true
                         if spyMode then
-                            print("|cFF00DDDD[SPY]|r " .. cleanName .. " used extra kick " .. ek.name .. " → CD=" .. ek.baseCd .. "s (spellID=" .. spellID .. " resolved=" .. resolvedID .. ")")
+                            print("|cFF00DDDD[SPY]|r " ..
+                                cleanName ..
+                                " used extra kick " ..
+                                ek.name ..
+                                " → CD=" .. ek.baseCd .. "s (spellID=" .. spellID .. " resolved=" .. resolvedID .. ")")
                         end
                         break
                     end
@@ -550,7 +567,9 @@ local function OnSpellCastSucceeded(unit, castGUID, spellID, isParty, cleanName)
                     -- Check it's not already there
                     local found = false
                     for _, ek in ipairs(info.extraKicks) do
-                        if ek.spellID == resolvedID then found = true; break end
+                        if ek.spellID == resolvedID then
+                            found = true; break
+                        end
                     end
                     if not found then
                         local ekData = ALL_INTERRUPTS[resolvedID]
@@ -562,7 +581,8 @@ local function OnSpellCastSucceeded(unit, castGUID, spellID, isParty, cleanName)
                         })
                         SetDisplayDirty()
                         if spyMode then
-                            print("|cFF00DDDD[SPY]|r Auto-added extra kick for " .. cleanName .. ": " .. ekData.name .. " CD=" .. ekData.cd .. "s")
+                            print("|cFF00DDDD[SPY]|r Auto-added extra kick for " ..
+                                cleanName .. ": " .. ekData.name .. " CD=" .. ekData.cd .. "s")
                         end
                     else
                         -- Update existing extra kick
@@ -617,7 +637,8 @@ local function OnSpellCastSucceeded(unit, castGUID, spellID, isParty, cleanName)
     if myExtraKicks[spellID] then
         myExtraKicks[spellID].cdEnd = GetTime() + myExtraKicks[spellID].baseCd
         if spyMode then
-            print("|cFF00DDDD[SPY]|r Own extra kick: " .. (myExtraKicks[spellID].name or "?") .. " CD=" .. myExtraKicks[spellID].baseCd)
+            print("|cFF00DDDD[SPY]|r Own extra kick: " ..
+                (myExtraKicks[spellID].name or "?") .. " CD=" .. myExtraKicks[spellID].baseCd)
         end
         return
     end
@@ -665,7 +686,7 @@ end
 -- Auto-register party members by class (no addon comms needed!)
 -- This is the key to working in M+ where SendAddonMessage is blocked
 local HEALER_KEEPS_KICK = {
-    SHAMAN  = true, -- Resto Shaman keeps Wind Shear
+    SHAMAN = true, -- Resto Shaman keeps Wind Shear
 }
 
 local function UnitIsMistweaver(unit)
@@ -691,7 +712,8 @@ local function AutoRegisterPartyByClass()
                         -- Mark as known non-kicker so the SUCC watcher skips their timestamps
                         noInterruptPlayers[name] = true
                         if spyMode then
-                            print("|cFF00DDDD[SPY]|r Skipping " .. name .. " (" .. cls .. " no-kick spec) - no kick expected")
+                            print("|cFF00DDDD[SPY]|r Skipping " ..
+                                name .. " (" .. cls .. " no-kick spec) - no kick expected")
                         end
                     else
                         local kickInfo = GetClassKickInfo(cls, u)
@@ -703,7 +725,8 @@ local function AutoRegisterPartyByClass()
                         }
                         SetDisplayDirty()
                         if spyMode then
-                            print("|cFF00DDDD[SPY]|r Auto-registered " .. name .. " (" .. cls .. ") " .. kickInfo.name .. " CD=" .. kickInfo.cd)
+                            print("|cFF00DDDD[SPY]|r Auto-registered " ..
+                                name .. " (" .. cls .. ") " .. kickInfo.name .. " CD=" .. kickInfo.cd)
                         end
                     end
                 end
@@ -732,7 +755,8 @@ local function ScanInspectTalents(unit)
                         if info.extraKicks[j].spellID == extraSpec.id then
                             table.remove(info.extraKicks, j)
                             if spyMode then
-                                print("|cFF00DDDD[SPY]|r Removed " .. extraSpec.name .. " from " .. name .. " (re-inspecting)")
+                                print("|cFF00DDDD[SPY]|r Removed " ..
+                                    extraSpec.name .. " from " .. name .. " (re-inspecting)")
                             end
                         end
                     end
@@ -768,14 +792,17 @@ local function ScanInspectTalents(unit)
                     if override.id == 119914 and family and family ~= "Felguard" then
                         applyOverride = false
                         if spyMode then
-                            print("|cFF00DDDD[SPY]|r Spec override " .. override.name .. " SKIPPED for " .. name .. " (pet=" .. tostring(family) .. ", not Felguard)")
+                            print("|cFF00DDDD[SPY]|r Spec override " ..
+                                override.name ..
+                                " SKIPPED for " .. name .. " (pet=" .. tostring(family) .. ", not Felguard)")
                         end
                     end
                 elseif petUnit and not UnitExists(petUnit) then
                     -- No pet out → skip pet override
                     applyOverride = false
                     if spyMode then
-                        print("|cFF00DDDD[SPY]|r Spec override " .. override.name .. " SKIPPED for " .. name .. " (no pet)")
+                        print("|cFF00DDDD[SPY]|r Spec override " ..
+                            override.name .. " SKIPPED for " .. name .. " (no pet)")
                     end
                 end
             end
@@ -783,7 +810,8 @@ local function ScanInspectTalents(unit)
                 info.spellID = override.id
                 info.baseCd = override.cd
                 if spyMode then
-                    print("|cFF00DDDD[SPY]|r Spec override for " .. name .. ": " .. override.name .. " CD=" .. override.cd .. " (specID=" .. specID .. ")")
+                    print("|cFF00DDDD[SPY]|r Spec override for " ..
+                        name .. ": " .. override.name .. " CD=" .. override.cd .. " (specID=" .. specID .. ")")
                 end
             else
                 -- Fall back to default warlock kick (Spell Lock)
@@ -806,7 +834,9 @@ local function ScanInspectTalents(unit)
                 if not extraSpec.talentCheck then
                     local found = false
                     for _, ek in ipairs(info.extraKicks) do
-                        if ek.spellID == extraSpec.id then found = true; break end
+                        if ek.spellID == extraSpec.id then
+                            found = true; break
+                        end
                     end
                     if not found then
                         table.insert(info.extraKicks, {
@@ -817,11 +847,15 @@ local function ScanInspectTalents(unit)
                             icon = extraSpec.icon,
                         })
                         if spyMode then
-                            print("|cFF00FF00[SPY]|r " .. name .. " spec extra kick: " .. extraSpec.name .. " CD=" .. extraSpec.cd .. "s")
+                            print("|cFF00FF00[SPY]|r " ..
+                                name .. " spec extra kick: " .. extraSpec.name .. " CD=" .. extraSpec.cd .. "s")
                         end
                     end
                 elseif spyMode then
-                    print("|cFF00DDDD[SPY]|r " .. name .. " extra kick " .. extraSpec.name .. " deferred to talent scan (check " .. extraSpec.talentCheck .. ")")
+                    print("|cFF00DDDD[SPY]|r " ..
+                        name ..
+                        " extra kick " ..
+                        extraSpec.name .. " deferred to talent scan (check " .. extraSpec.talentCheck .. ")")
                 end
             end
         end
@@ -880,7 +914,8 @@ local function ScanInspectTalents(unit)
                             if newCd < 1 then newCd = 1 end
                             info.baseCd = newCd
                             if spyMode then
-                                print("|cFF00FF00[SPY]|r " .. name .. " has |cFFFFFF00" .. talent.name .. "|r → CD adjusted to " .. newCd .. "s")
+                                print("|cFF00FF00[SPY]|r " ..
+                                    name .. " has |cFFFFFF00" .. talent.name .. "|r → CD adjusted to " .. newCd .. "s")
                             end
                         end
                         -- Check conditional CD reductions (on successful kick)
@@ -889,7 +924,10 @@ local function ScanInspectTalents(unit)
                         if onKick then
                             info.onKickReduction = onKick.reduction
                             if spyMode then
-                                print("|cFF00FF00[SPY]|r " .. name .. " has |cFFFFFF00" .. onKick.name .. "|r → -" .. onKick.reduction .. "s on successful kick")
+                                print("|cFF00FF00[SPY]|r " ..
+                                    name ..
+                                    " has |cFFFFFF00" ..
+                                    onKick.name .. "|r → -" .. onKick.reduction .. "s on successful kick")
                             end
                         end
                         -- Check extra kick talents (second interrupt ability)
@@ -904,7 +942,8 @@ local function ScanInspectTalents(unit)
                                 name = extra.name,
                             })
                             if spyMode then
-                                print("|cFF00FF00[SPY]|r " .. name .. " has |cFFFFFF00" .. extra.name .. "|r → extra kick CD=" .. extra.cd .. "s")
+                                print("|cFF00FF00[SPY]|r " ..
+                                    name .. " has |cFFFFFF00" .. extra.name .. "|r → extra kick CD=" .. extra.cd .. "s")
                             end
                         end
                         -- Check SPEC_EXTRA_KICKS with talentCheck (e.g., Grimoire: Fel Ravager)
@@ -922,7 +961,9 @@ local function ScanInspectTalents(unit)
                                     if not info.extraKicks then info.extraKicks = {} end
                                     local found = false
                                     for _, ek in ipairs(info.extraKicks) do
-                                        if ek.spellID == extraSpec.id then found = true; break end
+                                        if ek.spellID == extraSpec.id then
+                                            found = true; break
+                                        end
                                     end
                                     if not found then
                                         table.insert(info.extraKicks, {
@@ -933,7 +974,11 @@ local function ScanInspectTalents(unit)
                                             icon = extraSpec.icon,
                                         })
                                         if spyMode then
-                                            print("|cFF00FF00[SPY]|r " .. name .. " has talent " .. (defSpellStr or "?") .. " → extra kick " .. extraSpec.name .. " CD=" .. extraSpec.cd .. "s")
+                                            print("|cFF00FF00[SPY]|r " ..
+                                                name ..
+                                                " has talent " ..
+                                                (defSpellStr or "?") ..
+                                                " → extra kick " .. extraSpec.name .. " CD=" .. extraSpec.cd .. "s")
                                         end
                                     end
                                 end
@@ -947,7 +992,10 @@ local function ScanInspectTalents(unit)
 
     inspectedPlayers[name] = true
     if spyMode then
-        print("|cFF00DDDD[SPY]|r Inspect done for " .. name .. " → " .. (ALL_INTERRUPTS[info.spellID] and ALL_INTERRUPTS[info.spellID].name or "?") .. " CD=" .. info.baseCd)
+        print("|cFF00DDDD[SPY]|r Inspect done for " ..
+            name ..
+            " → " .. (ALL_INTERRUPTS[info.spellID] and ALL_INTERRUPTS[info.spellID].name or "?") .. " CD=" .. info
+            .baseCd)
     end
 end
 
@@ -987,13 +1035,13 @@ end
 -- Compute bar layout from frame size
 ------------------------------------------------------------
 local function GetBarLayout()
-    local fw = db.frameWidth
-    local titleH = db.showTitle and 20 or 0
-    local barH = math.max(12, db.barHeight)
-    local iconS = barH
-    local barW = fw - iconS
-    barW = math.max(60, barW)
-    local fontSize      = math.max(2, db.nameFontSize  or 12)
+    local fw            = db.frameWidth
+    local titleH        = db.showTitle and 20 or 0
+    local barH          = math.max(12, db.barHeight)
+    local iconS         = barH
+    local barW          = fw - iconS
+    barW                = math.max(60, barW)
+    local fontSize      = math.max(2, db.nameFontSize or 12)
     local cdFontSize    = math.max(2, db.readyFontSize or 12)
     local readyFontSize = math.max(2, db.readyTextSize or 12)
     return barW, barH, iconS, fontSize, cdFontSize, titleH, readyFontSize
@@ -1007,18 +1055,18 @@ local function UpdateMaxBars()
     local inRaid    = IsInRaid()
     local needed
     if not inRaid then
-        needed = 7          -- party (5) + buffer for extra kicks
+        needed = 7  -- party (5) + buffer for extra kicks
     elseif groupSize <= 10 then
-        needed = 12         -- 10-man raid + buffer
+        needed = 12 -- 10-man raid + buffer
     elseif groupSize <= 20 then
-        needed = 22         -- 20-man raid + buffer
+        needed = 22 -- 20-man raid + buffer
     else
-        needed = 42         -- 40-man raid + buffer
+        needed = 42 -- 40-man raid + buffer
     end
     needed = math.min(needed, MAX_BARS)
     if needed ~= currentMaxBars then
         currentMaxBars = needed
-        return true   -- caller should RebuildBars
+        return true -- caller should RebuildBars
     end
     return false
 end
@@ -1122,9 +1170,9 @@ local function RebuildBars()
         mycd:SetShadowOffset(1, -1)
         mycd:SetShadowColor(0, 0, 0, 1)
         f.playerCdWrapper = wrap
-        f.playerCdText = mycd
-        f.cdFontSz    = cdFontSize
-        f.readyFontSz = readyFontSzBuild
+        f.playerCdText    = mycd
+        f.cdFontSz        = cdFontSize
+        f.readyFontSz     = readyFontSzBuild
 
         f:EnableMouse(true)
         f:SetScript("OnEnter", function(self)
@@ -1147,7 +1195,6 @@ local function RebuildBars()
         f:Hide()
         bars[i] = f
     end
-
 end
 
 ------------------------------------------------------------
@@ -1232,7 +1279,9 @@ local function UpdateAlertBand(numVisible, now)
             if firstName == nil then firstName = myName end
         else
             local r = myKickCdEnd - now
-            if minRem == nil or r < minRem then minRem = r; nextKicker = myName end
+            if minRem == nil or r < minRem then
+                minRem = r; nextKicker = myName
+            end
         end
     end
     -- Self (extra kicks)
@@ -1242,7 +1291,9 @@ local function UpdateAlertBand(numVisible, now)
             if firstName == nil then firstName = myName end
         elseif ekInfo.cdEnd and ekInfo.cdEnd > now then
             local r = ekInfo.cdEnd - now
-            if minRem == nil or r < minRem then minRem = r; nextKicker = myName end
+            if minRem == nil or r < minRem then
+                minRem = r; nextKicker = myName
+            end
         end
     end
 
@@ -1253,7 +1304,9 @@ local function UpdateAlertBand(numVisible, now)
             if firstName == nil then firstName = name end
         else
             local r = PlayerNextRemaining(info)
-            if r and (minRem == nil or r < minRem) then minRem = r; nextKicker = name end
+            if r and (minRem == nil or r < minRem) then
+                minRem = r; nextKicker = name
+            end
         end
     end
 
@@ -1305,7 +1358,7 @@ local function UpdateDisplay()
         if rem > 0.5 then
             bar.cdBar:SetValue(rem)
             bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
-            bar.partyCdText:SetFont(FONT_FACE, bar.cdFontSz,   FONT_FLAGS)
+            bar.partyCdText:SetFont(FONT_FACE, bar.cdFontSz, FONT_FLAGS)
             bar.partyCdText:SetText(string.format("%.0f", rem))
             bar.partyCdText:SetTextColor(unpack(FONT_COLOR))
             bar.ttRem = rem
@@ -1421,9 +1474,12 @@ local function UpdateDisplay()
                 local rem = (info.cdEnd > now) and (info.cdEnd - now) or 0
                 local baseCd = info.baseCd or data.cd
                 table.insert(cachedPartyEntries, {
-                    kind    = "party",
-                    name    = name, info = info, data = data,
-                    rem     = rem,  baseCd = baseCd,
+                    kind = "party",
+                    name = name,
+                    info = info,
+                    data = data,
+                    rem = rem,
+                    baseCd = baseCd,
                     isReady = (rem <= 0.5),
                 })
             elseif spyMode and info.spellID then
@@ -1440,11 +1496,16 @@ local function UpdateDisplay()
                     if ekIcon or (okEk and ekData) then
                         local ekRem = (ek.cdEnd > now) and (ek.cdEnd - now) or 0
                         table.insert(cachedPartyEntries, {
-                            kind    = "partyExtra",
-                            name    = name, info = info, ek = ek,
-                            ekData  = okEk and ekData, ekIcon = ekIcon,
-                            ekRem   = ekRem, baseCd = ek.baseCd,
-                            isReady = (ekRem <= 0.5), col = col,
+                            kind = "partyExtra",
+                            name = name,
+                            info = info,
+                            ek = ek,
+                            ekData = okEk and ekData,
+                            ekIcon = ekIcon,
+                            ekRem = ekRem,
+                            baseCd = ek.baseCd,
+                            isReady = (ekRem <= 0.5),
+                            col = col,
                         })
                     end
                 end
@@ -1478,7 +1539,7 @@ local function UpdateDisplay()
             local bSnap = math.floor(bR * 10 + 0.5)
             if aSnap ~= bSnap then return aSnap < bSnap end
         end
-        return (a.name or "") < (b.name or "")  -- stable: alphabetical tiebreak
+        return (a.name or "") < (b.name or "") -- stable: alphabetical tiebreak
     end)
 
     for _, e in ipairs(cachedPartyEntries) do
@@ -1548,7 +1609,9 @@ local function FindMyInterrupt()
                 print("|cFF00DDDD[SPY]|r My spec " .. specID .. " has no interrupt")
             end
             mySpellID = nil
-            if oldSpellID then myCachedCD = nil; myBaseCd = nil end
+            if oldSpellID then
+                myCachedCD = nil; myBaseCd = nil
+            end
             return
         end
     end
@@ -1576,16 +1639,21 @@ local function FindMyInterrupt()
             -- Method 4: IsPlayerSpell
             if not petKnown then
                 local ok, result = pcall(IsPlayerSpell, override.id)
-                if ok and result then petKnown = true; method = "IsPlayerSpell" end
+                if ok and result then
+                    petKnown = true; method = "IsPlayerSpell"
+                end
             end
             -- Method 5: Check if pet exists and has Felguard spells
             if not petKnown and override.petSpellID and UnitExists("pet") then
                 local ok, result = pcall(IsPlayerSpell, override.petSpellID)
-                if ok and result then petKnown = true; method = "IsPlayerSpell(petSpell)" end
+                if ok and result then
+                    petKnown = true; method = "IsPlayerSpell(petSpell)"
+                end
             end
 
             if spyMode then
-                print("|cFF00DDDD[SPY]|r Pet override check: " .. override.name .. " → " .. method .. " petKnown=" .. tostring(petKnown))
+                print("|cFF00DDDD[SPY]|r Pet override check: " ..
+                    override.name .. " → " .. method .. " petKnown=" .. tostring(petKnown))
             end
 
             if petKnown then
@@ -1593,12 +1661,14 @@ local function FindMyInterrupt()
                 myBaseCd = override.cd
                 myIsPetSpell = true
                 if spyMode then
-                    print("|cFF00DDDD[SPY]|r My spec override: " .. override.name .. " CD=" .. override.cd .. " (pet detected)")
+                    print("|cFF00DDDD[SPY]|r My spec override: " ..
+                        override.name .. " CD=" .. override.cd .. " (pet detected)")
                 end
             else
                 if spyMode then
                     local family = UnitExists("pet") and UnitCreatureFamily("pet") or "no pet"
-                    print("|cFF00DDDD[SPY]|r Spec override " .. override.name .. " SKIPPED (pet=" .. tostring(family) .. ")")
+                    print("|cFF00DDDD[SPY]|r Spec override " ..
+                        override.name .. " SKIPPED (pet=" .. tostring(family) .. ")")
                 end
             end
         else
@@ -1631,10 +1701,12 @@ local function FindMyInterrupt()
                     talentCheck = extra.talentCheck,
                 }
                 if spyMode then
-                    print("|cFF00DDDD[SPY]|r My spec extra kick: " .. extra.name .. " CD=" .. extra.cd .. " (talent " .. checkID .. " known)")
+                    print("|cFF00DDDD[SPY]|r My spec extra kick: " ..
+                        extra.name .. " CD=" .. extra.cd .. " (talent " .. checkID .. " known)")
                 end
             elseif spyMode then
-                print("|cFF00DDDD[SPY]|r Spec extra kick " .. extra.name .. " NOT known (talent " .. checkID .. " missing)")
+                print("|cFF00DDDD[SPY]|r Spec extra kick " ..
+                    extra.name .. " NOT known (talent " .. checkID .. " missing)")
             end
         end
     end
@@ -1678,7 +1750,7 @@ local function FindMyInterrupt()
     -- Cache correct icon for pet spells using C_Spell on the actual pet version
     -- 119914 = Command Demon wrapper, 89766 = actual Axe Toss pet spell
     local PET_SPELL_ICONS = {
-        [119914] = 89766,  -- Axe Toss: use pet version for correct icon
+        [119914] = 89766, -- Axe Toss: use pet version for correct icon
     }
     if mySpellID and PET_SPELL_ICONS[mySpellID] and ALL_INTERRUPTS[mySpellID] then
         local petSpellID = PET_SPELL_ICONS[mySpellID]
@@ -1686,7 +1758,8 @@ local function FindMyInterrupt()
         if ok and tex then
             ALL_INTERRUPTS[mySpellID].icon = tex
             if spyMode then
-                print("|cFF00DDDD[SPY]|r Cached icon for " .. mySpellID .. " from pet spell " .. petSpellID .. " → " .. tostring(tex))
+                print("|cFF00DDDD[SPY]|r Cached icon for " ..
+                    mySpellID .. " from pet spell " .. petSpellID .. " → " .. tostring(tex))
             end
         end
     end
@@ -1721,19 +1794,23 @@ local function FindMyInterrupt()
                                     if ok5 and defInfo and defInfo.spellID then
                                         -- defInfo.spellID may be a secret value in 12.0; try string fallback
                                         local defSpellStr2 = nil
-                                        do local sok, s = pcall(tostring, defInfo.spellID); if sok then defSpellStr2 = s end end
+                                        do
+                                            local sok, s = pcall(tostring, defInfo.spellID); if sok then defSpellStr2 = s end
+                                        end
                                         local talent = (pcall(function() return CD_REDUCTION_TALENTS[defInfo.spellID] end) and CD_REDUCTION_TALENTS[defInfo.spellID])
                                             or (defSpellStr2 and CD_REDUCTION_TALENTS_STR[defSpellStr2])
                                         if talent and talent.affects == mySpellID then
                                             if talent.pctReduction then
-                                                local newCd = (myBaseCd or ALL_INTERRUPTS[mySpellID].cd) * (1 - talent.pctReduction / 100)
+                                                local newCd = (myBaseCd or ALL_INTERRUPTS[mySpellID].cd) *
+                                                    (1 - talent.pctReduction / 100)
                                                 myBaseCd = math.floor(newCd + 0.5)
                                             elseif talent.reduction then
                                                 myBaseCd = (myBaseCd or ALL_INTERRUPTS[mySpellID].cd) - talent.reduction
                                             end
                                             if myBaseCd < 1 then myBaseCd = 1 end
                                             if spyMode then
-                                                print("|cFF00DDDD[SPY]|r Own talent: " .. talent.name .. " → CD=" .. myBaseCd)
+                                                print("|cFF00DDDD[SPY]|r Own talent: " ..
+                                                    talent.name .. " → CD=" .. myBaseCd)
                                             end
                                         end
                                     end
@@ -1766,7 +1843,7 @@ local function MakeSlider(name, parent)
     local track = s:CreateTexture(nil, "BACKGROUND")
     track:SetTexture("Interface\\Buttons\\UI-SliderBar-Background")
     track:SetHorizTile(true)
-    track:SetPoint("LEFT",  0, 0)
+    track:SetPoint("LEFT", 0, 0)
     track:SetPoint("RIGHT", 0, 0)
     track:SetHeight(8)
 
@@ -1880,7 +1957,7 @@ local function ShowChangelogWindow()
     changelogFrame:EnableMouse(true)
     changelogFrame:RegisterForDrag("LeftButton")
     changelogFrame:SetScript("OnDragStart", changelogFrame.StartMoving)
-    changelogFrame:SetScript("OnDragStop",  changelogFrame.StopMovingOrSizing)
+    changelogFrame:SetScript("OnDragStop", changelogFrame.StopMovingOrSizing)
     changelogFrame:SetClampedToScreen(true)
     if changelogFrame.TitleText then changelogFrame.TitleText:SetText("") end
 
@@ -1888,19 +1965,19 @@ local function ShowChangelogWindow()
     local hdr = changelogFrame:CreateTexture(nil, "BACKGROUND", nil, 2)
     hdr:SetTexture(FLAT_TEX)
     hdr:SetVertexColor(0.12, 0.09, 0.02, 1)
-    hdr:SetPoint("TOPLEFT",  0, -22)
+    hdr:SetPoint("TOPLEFT", 0, -22)
     hdr:SetPoint("TOPRIGHT", 0, -22)
     hdr:SetHeight(64)
     local hdrLineTop = changelogFrame:CreateTexture(nil, "BORDER")
     hdrLineTop:SetTexture(FLAT_TEX)
     hdrLineTop:SetVertexColor(0.87, 0.73, 0.37, 0.75)
-    hdrLineTop:SetPoint("TOPLEFT",  0, -22)
+    hdrLineTop:SetPoint("TOPLEFT", 0, -22)
     hdrLineTop:SetPoint("TOPRIGHT", 0, -22)
     hdrLineTop:SetHeight(1)
     local hdrLineBot = changelogFrame:CreateTexture(nil, "BORDER")
     hdrLineBot:SetTexture(FLAT_TEX)
     hdrLineBot:SetVertexColor(0.87, 0.73, 0.37, 0.75)
-    hdrLineBot:SetPoint("TOPLEFT",  0, -86)
+    hdrLineBot:SetPoint("TOPLEFT", 0, -86)
     hdrLineBot:SetPoint("TOPRIGHT", 0, -86)
     hdrLineBot:SetHeight(1)
     local hdrTitle = changelogFrame:CreateFontString(nil, "OVERLAY")
@@ -1958,36 +2035,40 @@ local function CreateConfigPanel()
     configFrame:EnableMouse(true)
     configFrame:RegisterForDrag("LeftButton")
     configFrame:SetScript("OnDragStart", configFrame.StartMoving)
-    configFrame:SetScript("OnDragStop",  configFrame.StopMovingOrSizing)
+    configFrame:SetScript("OnDragStop", configFrame.StopMovingOrSizing)
     configFrame:SetClampedToScreen(true)
     if configFrame.TitleText then configFrame.TitleText:SetText("") end
     -- Escape key closes Settings (and triggers OnHide → closes child windows)
     table.insert(UISpecialFrames, "LoxxConfigFrame")
     -- Close child windows when Settings is closed
     configFrame:SetScript("OnHide", function()
-        if statsFrame     then statsFrame:Hide();     statsFrame     = nil end
-        if changelogFrame then changelogFrame:Hide(); changelogFrame = nil end
+        if statsFrame then
+            statsFrame:Hide(); statsFrame = nil
+        end
+        if changelogFrame then
+            changelogFrame:Hide(); changelogFrame = nil
+        end
     end)
 
     -- Header background: warm dark
     local hdr = configFrame:CreateTexture(nil, "BACKGROUND", nil, 2)
     hdr:SetTexture(FLAT_TEX)
     hdr:SetVertexColor(0.12, 0.09, 0.02, 1)
-    hdr:SetPoint("TOPLEFT",  0, -22)
+    hdr:SetPoint("TOPLEFT", 0, -22)
     hdr:SetPoint("TOPRIGHT", 0, -22)
     hdr:SetHeight(64)
     -- Gold top separator
     local hdrLineTop = configFrame:CreateTexture(nil, "BORDER")
     hdrLineTop:SetTexture(FLAT_TEX)
     hdrLineTop:SetVertexColor(0.87, 0.73, 0.37, 0.75)
-    hdrLineTop:SetPoint("TOPLEFT",  0, -22)
+    hdrLineTop:SetPoint("TOPLEFT", 0, -22)
     hdrLineTop:SetPoint("TOPRIGHT", 0, -22)
     hdrLineTop:SetHeight(1)
     -- Gold bottom separator
     local hdrLineBot = configFrame:CreateTexture(nil, "BORDER")
     hdrLineBot:SetTexture(FLAT_TEX)
     hdrLineBot:SetVertexColor(0.87, 0.73, 0.37, 0.75)
-    hdrLineBot:SetPoint("TOPLEFT",  0, -86)
+    hdrLineBot:SetPoint("TOPLEFT", 0, -86)
     hdrLineBot:SetPoint("TOPRIGHT", 0, -86)
     hdrLineBot:SetHeight(1)
     -- Title: centered, gold
@@ -2003,13 +2084,13 @@ local function CreateConfigPanel()
     hdrLineL:SetTexture(FLAT_TEX)
     hdrLineL:SetHeight(1)
     hdrLineL:SetVertexColor(0.87, 0.73, 0.37, 0.55)
-    hdrLineL:SetPoint("LEFT",  configFrame, "TOPLEFT", 16, -44)
+    hdrLineL:SetPoint("LEFT", configFrame, "TOPLEFT", 16, -44)
     hdrLineL:SetPoint("RIGHT", hdrTitle, "LEFT", -10, 0)
     local hdrLineR = configFrame:CreateTexture(nil, "ARTWORK")
     hdrLineR:SetTexture(FLAT_TEX)
     hdrLineR:SetHeight(1)
     hdrLineR:SetVertexColor(0.87, 0.73, 0.37, 0.55)
-    hdrLineR:SetPoint("LEFT",  hdrTitle, "RIGHT", 10, 0)
+    hdrLineR:SetPoint("LEFT", hdrTitle, "RIGHT", 10, 0)
     hdrLineR:SetPoint("RIGHT", configFrame, "TOPRIGHT", -16, -44)
     -- Version: centered, smaller, darker gold
     local hdrVersion = configFrame:CreateFontString(nil, "OVERLAY")
@@ -2036,7 +2117,7 @@ local function CreateConfigPanel()
     local div = configFrame:CreateTexture(nil, "ARTWORK")
     div:SetTexture(FLAT_TEX)
     div:SetVertexColor(0.45, 0.38, 0.22, 0.35)
-    div:SetPoint("TOPLEFT",    configFrame, "TOPLEFT", MID,     -86)
+    div:SetPoint("TOPLEFT", configFrame, "TOPLEFT", MID, -86)
     div:SetPoint("BOTTOMLEFT", configFrame, "BOTTOMLEFT", MID, 52)
     div:SetWidth(1)
 
@@ -2443,7 +2524,7 @@ local function CreateUI()
     bg:SetTexture(FLAT_TEX)
     bg:SetVertexColor(0.06, 0.06, 0.06, 0.95)
 
-    local GR, GG, GB = 0.87, 0.73, 0.37  -- kept for titleSep colour
+    local GR, GG, GB = 0.87, 0.73, 0.37 -- kept for titleSep colour
 
     -- Title header band (warm dark like Details)
     local titleBand = mainFrame:CreateTexture(nil, "BACKGROUND", nil, 1)
@@ -2479,7 +2560,7 @@ local function CreateUI()
     -- Alert band (danger: no kick available) — attached inside mainFrame at bottom
     local alertBand = CreateFrame("Frame", nil, mainFrame)
     alertBand:SetHeight(22)
-    alertBand:SetPoint("BOTTOMLEFT",  mainFrame, "BOTTOMLEFT",  0, 0)
+    alertBand:SetPoint("BOTTOMLEFT", mainFrame, "BOTTOMLEFT", 0, 0)
     alertBand:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", 0, 0)
     alertBand:SetFrameLevel(mainFrame:GetFrameLevel() + 5)
     alertBand:Hide()
@@ -2545,7 +2626,10 @@ local function SetupSlash()
             if testMode then
                 -- Stop test
                 testMode = false
-                if testTicker then testTicker:Cancel() testTicker = nil end
+                if testTicker then
+                    testTicker:Cancel()
+                    testTicker = nil
+                end
                 partyAddonUsers = {}
                 -- Clear fake test run so it doesn't pollute real history
                 if loxxCurrentRun and loxxCurrentRun.instanceID == -1 then
@@ -2601,7 +2685,8 @@ local function SetupSlash()
                     local ok, name, realm = pcall(UnitFullName, unit)
                     if ok and name then
                         local target = (realm and realm ~= "") and (name .. "-" .. realm) or name
-                        local ok2, ret2 = pcall(C_ChatInfo.SendAddonMessage, MSG_PREFIX, "PING:WHISPER", "WHISPER", target)
+                        local ok2, ret2 = pcall(C_ChatInfo.SendAddonMessage, MSG_PREFIX, "PING:WHISPER", "WHISPER",
+                            target)
                         print("  WHISPER " .. target .. " -> ok=" .. tostring(ok2) .. " ret=" .. tostring(ret2))
                     end
                 end
@@ -2622,7 +2707,12 @@ local function SetupSlash()
                     local name = exists and UnitName(unit) or "?"
                     local hasFrame = partyFrames[i] ~= nil
                     local isReg = hasFrame and partyFrames[i]:IsEventRegistered("UNIT_SPELLCAST_SUCCEEDED")
-                    print("  " .. unit .. ": exists=" .. tostring(exists) .. " name=" .. tostring(name) .. " frame=" .. tostring(hasFrame) .. " registered=" .. tostring(isReg))
+                    print("  " ..
+                        unit ..
+                        ": exists=" ..
+                        tostring(exists) ..
+                        " name=" ..
+                        tostring(name) .. " frame=" .. tostring(hasFrame) .. " registered=" .. tostring(isReg))
                 end
                 print("  Ask your mate to cast ANY spell")
                 -- Force re-register watchers
@@ -2638,50 +2728,67 @@ local function SetupSlash()
             if mainFrame then
                 local l, t = mainFrame:GetLeft(), mainFrame:GetTop()
                 print("|cFF00DDDD[LOXX]|r Current position: " .. tostring(l) .. ", " .. tostring(t))
-                print("  Account saved: " .. tostring(LOXXAccountVars and LOXXAccountVars.frameX) .. ", " .. tostring(LOXXAccountVars and LOXXAccountVars.frameY))
+                print("  Account saved: " ..
+                    tostring(LOXXAccountVars and LOXXAccountVars.frameX) ..
+                    ", " .. tostring(LOXXAccountVars and LOXXAccountVars.frameY))
                 print("  Char saved: " .. tostring(db and db.frameX) .. ", " .. tostring(db and db.frameY))
             else
                 print("|cFF00DDDD[LOXX]|r mainFrame not yet created.")
             end
         elseif cmd == "debug" then
-            print("|cFF00DDDD[LOXX]|r v" .. LOXX_VERSION .. " | " .. tostring(myClass) .. " | CD cached: " .. tostring(myCachedCD))
+            print("|cFF00DDDD[LOXX]|r v" ..
+                LOXX_VERSION .. " | " .. tostring(myClass) .. " | CD cached: " .. tostring(myCachedCD))
             for name, info in pairs(partyAddonUsers) do
                 local rem = info.cdEnd - GetTime()
                 if rem < 0 then rem = 0 end
                 local spellName = ALL_INTERRUPTS[info.spellID] and ALL_INTERRUPTS[info.spellID].name or "?"
                 local inspected = inspectedPlayers[name] and "inspected" or "not inspected"
-                print(string.format("  %s (%s) %s CD=%.0f rem=%.1f [%s]", name, info.class, spellName, info.baseCd, rem, inspected))
+                print(string.format("  %s (%s) %s CD=%.0f rem=%.1f [%s]", name, info.class, spellName, info.baseCd, rem,
+                    inspected))
             end
         elseif cmd == "stats" then
             ShowStatsWindow()
         elseif cmd == "stats clear" then
             LOXXSavedVars.loxxRunHistory = {}
             if loxxCurrentRun and loxxCurrentRun.instanceID ~= -1 then loxxCurrentRun = nil end
-            if statsFrame then statsFrame:Hide(); statsFrame = nil end
+            if statsFrame then
+                statsFrame:Hide(); statsFrame = nil
+            end
             print("|cFF00DDDD[LOXX]|r " .. L["CMD_HIST_CLEAR"])
         elseif cmd == "record" then
             if loxxDungeonLogActive then
                 loxxDungeonLogActive = false
-                print("|cFF00DDDD[LOXX]|r Dungeon log |cFFFF4444STOPPED|r — " .. #loxxDungeonLog .. " entries. /loxx record show to view.")
+                print("|cFF00DDDD[LOXX]|r Dungeon log |cFFFF4444STOPPED|r — " ..
+                    #loxxDungeonLog .. " entries. /loxx record show to view.")
             else
                 loxxDungeonLog = {}
                 loxxDungeonLogActive = true
-                -- Snapshot party at start
+                -- Snapshot party at start (player + party1-4)
                 local party = {}
-                for i = 1, 4 do
-                    local u = "party" .. i
+                local units = { "player", "party1", "party2", "party3", "party4" }
+                for _, u in ipairs(units) do
                     if UnitExists(u) then
                         local n = UnitName(u) or "?"
                         local _, cls = UnitClass(u)
-                        table.insert(party, n .. "(" .. (cls or "?") .. ")")
+                        local specID = GetInspectSpecialization(u) or 0
+                        local specName = "?"
+                        if specID > 0 then
+                            local _, sn = GetSpecializationInfoByID(specID)
+                            specName = sn or "?"
+                        end
+                        table.insert(party, n .. "(" .. (cls or "?") .. ":" .. specName .. ")")
+                        DLog("PARTY", n .. " | " .. (cls or "?") .. " | " .. specName .. " (" .. specID .. ")")
                     end
                 end
                 DLog("START", "Manual start — party: " .. (next(party) and table.concat(party, ", ") or "solo"))
-                print("|cFF00DDDD[LOXX]|r Dungeon log |cFF00FF00STARTED|r. /loxx record to stop, /loxx record show to view.")
+                print(
+                    "|cFF00DDDD[LOXX]|r Dungeon log |cFF00FF00STARTED|r. /loxx record to stop, /loxx record show to view.")
             end
         elseif cmd == "record show" then
             -- Open scrollable copy-paste window
-            if dungeonLogFrame then dungeonLogFrame:Hide(); dungeonLogFrame = nil end
+            if dungeonLogFrame then
+                dungeonLogFrame:Hide(); dungeonLogFrame = nil
+            end
             if #loxxDungeonLog == 0 then
                 print("|cFF00DDDD[LOXX]|r No dungeon log entries yet.")
             else
@@ -2690,10 +2797,14 @@ local function SetupSlash()
                 f:SetSize(700, 500)
                 f:SetPoint("CENTER")
                 f:SetFrameStrata("DIALOG")
-                f:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-                    edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", tile = true,
-                    tileSize = 32, edgeSize = 32,
-                    insets = { left = 11, right = 12, top = 12, bottom = 11 } })
+                f:SetBackdrop({
+                    bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+                    edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+                    tile = true,
+                    tileSize = 32,
+                    edgeSize = 32,
+                    insets = { left = 11, right = 12, top = 12, bottom = 11 }
+                })
                 f:SetMovable(true)
                 f:EnableMouse(true)
                 f:RegisterForDrag("LeftButton")
@@ -2702,7 +2813,8 @@ local function SetupSlash()
                 -- Header
                 local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
                 title:SetPoint("TOP", f, "TOP", 0, -16)
-                title:SetText("|cFF00DDDDLoxx Dungeon Log|r — " .. #loxxDungeonLog .. " entries" .. (loxxDungeonLogActive and " |cFF00FF00[LIVE]|r" or ""))
+                title:SetText("|cFF00DDDDLoxx Dungeon Log|r — " ..
+                    #loxxDungeonLog .. " entries" .. (loxxDungeonLogActive and " |cFF00FF00[LIVE]|r" or ""))
                 -- Hint
                 local hint = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
                 hint:SetPoint("TOP", title, "BOTTOM", 0, -4)
@@ -2711,7 +2823,9 @@ local function SetupSlash()
                 -- Close button
                 local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
                 closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -5, -5)
-                closeBtn:SetScript("OnClick", function() f:Hide(); dungeonLogFrame = nil end)
+                closeBtn:SetScript("OnClick", function()
+                    f:Hide(); dungeonLogFrame = nil
+                end)
                 -- ScrollFrame + EditBox
                 local sf = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
                 sf:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -60)
@@ -2722,7 +2836,9 @@ local function SetupSlash()
                 eb:SetAutoFocus(false)
                 eb:SetFontObject(GameFontHighlightSmall)
                 eb:SetMaxLetters(0)
-                eb:SetScript("OnEscapePressed", function() f:Hide(); dungeonLogFrame = nil end)
+                eb:SetScript("OnEscapePressed", function()
+                    f:Hide(); dungeonLogFrame = nil
+                end)
                 sf:SetScrollChild(eb)
                 -- Fill text
                 local lines = table.concat(loxxDungeonLog, "\n")
@@ -2734,7 +2850,9 @@ local function SetupSlash()
         elseif cmd == "record clear" then
             loxxDungeonLog = {}
             loxxDungeonLogActive = false
-            if dungeonLogFrame then dungeonLogFrame:Hide(); dungeonLogFrame = nil end
+            if dungeonLogFrame then
+                dungeonLogFrame:Hide(); dungeonLogFrame = nil
+            end
             print("|cFF00DDDD[LOXX]|r Dungeon log cleared.")
         elseif cmd == "logs" or cmd == "log" then
             if #loxxErrorLog == 0 then
@@ -2753,7 +2871,8 @@ local function SetupSlash()
             if LOXXSavedVars then LOXXSavedVars.loxxErrorLog = {} end
             print("|cFF00DDDD[LOXX]|r " .. L["CMD_LOG_CLEAR"])
         elseif cmd == "help" then
-            print("|cFF00DDDD[LOXX]|r /loxx, /loxx config|options|settings, show, hide, lock, unlock, test, stats, stats clear, logs, logs clear, record, record show, record clear, ping, spy, pos, debug, help")
+            print(
+                "|cFF00DDDD[LOXX]|r /loxx, /loxx config|options|settings, show, hide, lock, unlock, test, stats, stats clear, logs, logs clear, record, record show, record clear, ping, spy, pos, debug, help")
         else
             -- Default: open config
             CreateConfigPanel()
@@ -2768,7 +2887,7 @@ local function ArchiveCurrentRun()
     if not (loxxCurrentRun and next(loxxCurrentRun.players)) then return end
     if loxxCurrentRun.startTime then
         loxxCurrentRun.duration = math.floor(GetTime() - loxxCurrentRun.startTime)
-        loxxCurrentRun.startTime = nil  -- don't persist the raw timestamp
+        loxxCurrentRun.startTime = nil -- don't persist the raw timestamp
     end
     LOXXSavedVars.loxxRunHistory = LOXXSavedVars.loxxRunHistory or {}
     -- Avoid double-archiving the same run (instanceID + date match)
@@ -2829,7 +2948,7 @@ ShowStatsWindow = function()
 
     local function SortedPlayers(players)
         local t = {}
-        for n, k in pairs(players) do t[#t+1] = {name=n, kicks=k} end
+        for n, k in pairs(players) do t[#t + 1] = { name = n, kicks = k } end
         table.sort(t, function(a, b) return a.kicks > b.kicks end)
         return t
     end
@@ -2851,7 +2970,7 @@ ShowStatsWindow = function()
             end
         end
         local t = {}
-        for name, kicks in pairs(totals) do t[#t+1] = {name=name, kicks=kicks} end
+        for name, kicks in pairs(totals) do t[#t + 1] = { name = name, kicks = kicks } end
         table.sort(t, function(a, b) return a.kicks > b.kicks end)
         return t, runCount
     end
@@ -2868,7 +2987,7 @@ ShowStatsWindow = function()
     sf:EnableMouse(true)
     sf:RegisterForDrag("LeftButton")
     sf:SetScript("OnDragStart", sf.StartMoving)
-    sf:SetScript("OnDragStop",  sf.StopMovingOrSizing)
+    sf:SetScript("OnDragStop", sf.StopMovingOrSizing)
     sf:SetClampedToScreen(true)
     sf:SetFrameStrata("DIALOG")
     if sf.TitleText then sf.TitleText:SetText("") end
@@ -2877,19 +2996,19 @@ ShowStatsWindow = function()
     local hdr = sf:CreateTexture(nil, "BACKGROUND", nil, 2)
     hdr:SetTexture(FLAT_TEX)
     hdr:SetVertexColor(0.12, 0.09, 0.02, 1)
-    hdr:SetPoint("TOPLEFT",  0, -22)
+    hdr:SetPoint("TOPLEFT", 0, -22)
     hdr:SetPoint("TOPRIGHT", 0, -22)
     hdr:SetHeight(64)
     local hdrLineTop = sf:CreateTexture(nil, "BORDER")
     hdrLineTop:SetTexture(FLAT_TEX)
     hdrLineTop:SetVertexColor(0.87, 0.73, 0.37, 0.75)
-    hdrLineTop:SetPoint("TOPLEFT",  0, -22)
+    hdrLineTop:SetPoint("TOPLEFT", 0, -22)
     hdrLineTop:SetPoint("TOPRIGHT", 0, -22)
     hdrLineTop:SetHeight(1)
     local hdrLineBot = sf:CreateTexture(nil, "BORDER")
     hdrLineBot:SetTexture(FLAT_TEX)
     hdrLineBot:SetVertexColor(0.87, 0.73, 0.37, 0.75)
-    hdrLineBot:SetPoint("TOPLEFT",  0, -86)
+    hdrLineBot:SetPoint("TOPLEFT", 0, -86)
     hdrLineBot:SetPoint("TOPRIGHT", 0, -86)
     hdrLineBot:SetHeight(1)
     local hdrTitle = sf:CreateFontString(nil, "OVERLAY")
@@ -2903,26 +3022,26 @@ ShowStatsWindow = function()
     hdrLineL:SetTexture(FLAT_TEX)
     hdrLineL:SetHeight(1)
     hdrLineL:SetVertexColor(0.87, 0.73, 0.37, 0.55)
-    hdrLineL:SetPoint("LEFT",  sf, "TOPLEFT", 16, -44)
+    hdrLineL:SetPoint("LEFT", sf, "TOPLEFT", 16, -44)
     hdrLineL:SetPoint("RIGHT", hdrTitle, "LEFT", -10, 0)
     local hdrLineR = sf:CreateTexture(nil, "ARTWORK")
     hdrLineR:SetTexture(FLAT_TEX)
     hdrLineR:SetHeight(1)
     hdrLineR:SetVertexColor(0.87, 0.73, 0.37, 0.55)
-    hdrLineR:SetPoint("LEFT",  hdrTitle, "RIGHT", 10, 0)
+    hdrLineR:SetPoint("LEFT", hdrTitle, "RIGHT", 10, 0)
     hdrLineR:SetPoint("RIGHT", sf, "TOPRIGHT", -16, -44)
 
     -- ── Footer with "Clear All" button ───────────────────────────
     local footerBand = sf:CreateTexture(nil, "BACKGROUND", nil, 1)
     footerBand:SetTexture(FLAT_TEX)
     footerBand:SetVertexColor(0.08, 0.06, 0.02, 1)
-    footerBand:SetPoint("BOTTOMLEFT",  sf, "BOTTOMLEFT",  0, 0)
+    footerBand:SetPoint("BOTTOMLEFT", sf, "BOTTOMLEFT", 0, 0)
     footerBand:SetPoint("BOTTOMRIGHT", sf, "BOTTOMRIGHT", 0, 0)
     footerBand:SetHeight(38)
     local footerLine = sf:CreateTexture(nil, "BORDER")
     footerLine:SetTexture(FLAT_TEX)
     footerLine:SetVertexColor(0.87, 0.73, 0.37, 0.5)
-    footerLine:SetPoint("BOTTOMLEFT",  sf, "BOTTOMLEFT",  0, 38)
+    footerLine:SetPoint("BOTTOMLEFT", sf, "BOTTOMLEFT", 0, 38)
     footerLine:SetPoint("BOTTOMRIGHT", sf, "BOTTOMRIGHT", 0, 38)
     footerLine:SetHeight(1)
     local clearBtn = CreateFrame("Button", nil, sf, "UIPanelButtonTemplate")
@@ -2935,12 +3054,12 @@ ShowStatsWindow = function()
     clearBtn:SetScript("OnClick", function()
         LOXXSavedVars.loxxRunHistory = {}
         if loxxCurrentRun and loxxCurrentRun.instanceID ~= -1 then loxxCurrentRun = nil end
-        sf:Hide() ; statsFrame = nil ; ShowStatsWindow()
+        sf:Hide(); statsFrame = nil; ShowStatsWindow()
     end)
 
     -- ── Scroll content ───────────────────────────────────────────
     local scroll = CreateFrame("ScrollFrame", nil, sf, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT",     16, -90)
+    scroll:SetPoint("TOPLEFT", 16, -90)
     scroll:SetPoint("BOTTOMRIGHT", -32, 42)
 
     local content = CreateFrame("Frame", nil, scroll)
@@ -2958,7 +3077,7 @@ ShowStatsWindow = function()
         local s = content:CreateTexture(nil, "ARTWORK")
         s:SetTexture(FLAT_TEX)
         s:SetVertexColor(0.45, 0.38, 0.22, 0.5)
-        s:SetPoint("TOPLEFT",  0, y - 4)
+        s:SetPoint("TOPLEFT", 0, y - 4)
         s:SetPoint("TOPRIGHT", -4, y - 4)
         s:SetHeight(1)
         y = y - 12
@@ -2970,12 +3089,18 @@ ShowStatsWindow = function()
     local totals, runCount = ComputeTotals()
     if #totals > 0 then
         renderedSomething = true
-        AddLine("|cFF00DDDD" .. string.format(L["STATS_ALLTIME"], runCount, (runCount ~= 1 and L["STATS_RUNS"] or L["STATS_RUN"])) .. "|r", 0, "GameFontNormal")
+        AddLine(
+            "|cFF00DDDD" ..
+            string.format(L["STATS_ALLTIME"], runCount, (runCount ~= 1 and L["STATS_RUNS"] or L["STATS_RUN"])) .. "|r", 0,
+            "GameFontNormal")
         y = y - 18
         local medals = { "|cFFFFD100#1|r ", "|cFFCCCCCC#2|r ", "|cFFAA7744#3|r " }
         for rank, row in ipairs(totals) do
             local prefix = medals[rank] or "   "
-            AddLine(prefix .. row.name .. " — " .. row.kicks .. " " .. (row.kicks ~= 1 and L["STATS_KICKS"] or L["STATS_KICK"]), 8)
+            AddLine(
+                prefix ..
+                row.name .. " — " .. row.kicks .. " " .. (row.kicks ~= 1 and L["STATS_KICKS"] or L["STATS_KICK"]),
+                8)
             y = y - 14
         end
         y = y - 8
@@ -2985,13 +3110,18 @@ ShowStatsWindow = function()
     if loxxCurrentRun then
         renderedSomething = true
         if #totals > 0 then AddSep() end
-        AddLine("|cFF00DDDD" .. L["STATS_CURRENT"] .. "|r", 0, "GameFontNormal") ; y = y - 18
+        AddLine("|cFF00DDDD" .. L["STATS_CURRENT"] .. "|r", 0, "GameFontNormal"); y = y - 18
         local keyStr = (loxxCurrentRun.keyLevel or 0) > 0 and (" [+" .. loxxCurrentRun.keyLevel .. "]") or ""
-        AddLine("|cFFFFD100" .. (loxxCurrentRun.dungeon or "?") .. keyStr .. "|r  |cFF888888" .. (loxxCurrentRun.date or "") .. "|r", 0)
+        AddLine(
+            "|cFFFFD100" ..
+            (loxxCurrentRun.dungeon or "?") .. keyStr .. "|r  |cFF888888" .. (loxxCurrentRun.date or "") .. "|r", 0)
         y = y - 16
         if loxxCurrentRun.players and next(loxxCurrentRun.players) then
             for _, row in ipairs(SortedPlayers(loxxCurrentRun.players)) do
-                AddLine("  " .. row.name .. " — " .. row.kicks .. " " .. (row.kicks ~= 1 and L["STATS_KICKS"] or L["STATS_KICK"]), 8)
+                AddLine(
+                    "  " ..
+                    row.name .. " — " .. row.kicks .. " " .. (row.kicks ~= 1 and L["STATS_KICKS"] or L["STATS_KICK"]),
+                    8)
                 y = y - 14
             end
         else
@@ -3006,11 +3136,13 @@ ShowStatsWindow = function()
     if #runs > 0 then
         renderedSomething = true
         AddSep()
-        AddLine("|cFFFFD100" .. string.format(L["STATS_HISTORY"], #runs) .. "|r", 0, "GameFontNormal") ; y = y - 20
+        AddLine("|cFFFFD100" .. string.format(L["STATS_HISTORY"], #runs) .. "|r", 0, "GameFontNormal"); y = y - 20
         for i, run in ipairs(runs) do
             local keyStr = (run.keyLevel or 0) > 0 and (" [+" .. run.keyLevel .. "]") or ""
             local durStr = FormatDuration(run.duration)
-            AddLine("|cFFFFCC00" .. (run.dungeon or "?") .. keyStr .. "|r  |cFF888888" .. (run.date or "") .. durStr .. "|r", 0)
+            AddLine(
+                "|cFFFFCC00" .. (run.dungeon or "?") .. keyStr .. "|r  |cFF888888" .. (run.date or "") .. durStr .. "|r",
+                0)
             -- Delete (×) button
             local delBtn = CreateFrame("Button", nil, content)
             delBtn:SetSize(16, 14)
@@ -3020,11 +3152,14 @@ ShowStatsWindow = function()
             local runIdx = i
             delBtn:SetScript("OnClick", function()
                 table.remove(LOXXSavedVars.loxxRunHistory, runIdx)
-                sf:Hide() ; statsFrame = nil ; ShowStatsWindow()
+                sf:Hide(); statsFrame = nil; ShowStatsWindow()
             end)
             y = y - 16
             for _, row in ipairs(SortedPlayers(run.players)) do
-                AddLine("  " .. row.name .. " — " .. row.kicks .. " " .. (row.kicks ~= 1 and L["STATS_KICKS"] or L["STATS_KICK"]), 8)
+                AddLine(
+                    "  " ..
+                    row.name .. " — " .. row.kicks .. " " .. (row.kicks ~= 1 and L["STATS_KICKS"] or L["STATS_KICK"]),
+                    8)
                 y = y - 14
             end
             y = y - 8
@@ -3049,14 +3184,14 @@ end
 ------------------------------------------------------------
 local function RegisterBlizzardOptions()
     local panel = CreateFrame("Frame")
-    panel.name = "Loxx Interrupt Tracker"
+    panel.name  = "Loxx Interrupt Tracker"
 
     -- Column layout: left x=16, right x=310. Sliders: width=220.
-    local LX   = 16    -- left col labels/checkboxes
-    local RX   = 310   -- right col labels/checkboxes
-    local LSL  = 20    -- left col slider x
-    local RSL  = 314   -- right col slider x
-    local SW   = 220   -- slider width
+    local LX    = 16  -- left col labels/checkboxes
+    local RX    = 310 -- right col labels/checkboxes
+    local LSL   = 20  -- left col slider x
+    local RSL   = 314 -- right col slider x
+    local SW    = 220 -- slider width
 
     -- Shared helper: slider
     local function BS(name, parent, x, y, min, max, step, initVal, labelFn, onChanged)
@@ -3112,58 +3247,68 @@ local function RegisterBlizzardOptions()
     local sep = panel:CreateTexture(nil, "ARTWORK")
     sep:SetTexture(FLAT_TEX)
     sep:SetVertexColor(0.45, 0.38, 0.22, 0.5)
-    sep:SetPoint("TOPLEFT",  LX,      -54)
-    sep:SetPoint("TOPRIGHT", -LX,     -54)
+    sep:SetPoint("TOPLEFT", LX, -54)
+    sep:SetPoint("TOPRIGHT", -LX, -54)
     sep:SetHeight(1)
 
     -- ── LEFT COLUMN ──────────────────────────────────────────────────────────
     local yL = -66
 
-    BH("DISPLAY", LX, yL) ; yL = yL - 22
-    BC("Show Title Bar",       "showTitle",        LX, yL) ; yL = yL - 24
-    BC("Lock Position",        "locked",           LX, yL) ; yL = yL - 24
-    BC("Show READY Text",      "showReady",        LX, yL) ; yL = yL - 24
-    BC("Show 'X kicks ready' bar", "showKicksReadyBar", LX, yL) ; yL = yL - 24
-    BC("Tooltip on Hover", "showTooltip",LX, yL) ; yL = yL - 24
-    BC("Hide out of combat","hideOutOfCombat", LX, yL) ; yL = yL - 36
+    BH("DISPLAY", LX, yL); yL = yL - 22
+    BC("Show Title Bar", "showTitle", LX, yL); yL = yL - 24
+    BC("Lock Position", "locked", LX, yL); yL = yL - 24
+    BC("Show READY Text", "showReady", LX, yL); yL = yL - 24
+    BC("Show 'X kicks ready' bar", "showKicksReadyBar", LX, yL); yL = yL - 24
+    BC("Tooltip on Hover", "showTooltip", LX, yL); yL = yL - 24
+    BC("Hide out of combat", "hideOutOfCombat", LX, yL); yL = yL - 36
 
-    BH("FONT SIZES", LX, yL) ; yL = yL - 22
+    BH("FONT SIZES", LX, yL); yL = yL - 22
     BS("LOXX_Blizz_NameFont", panel, LSL, yL, 2, 32, 1,
         math.max(2, db.nameFontSize or 12),
         function(v) return "Name: " .. v end,
-        function(v) v = math.floor(v+0.5); db.nameFontSize = v; RebuildBars(); return v end)
+        function(v)
+            v = math.floor(v + 0.5); db.nameFontSize = v; RebuildBars(); return v
+        end)
     yL = yL - 44
     BS("LOXX_Blizz_CdFont", panel, LSL, yL, 2, 32, 1,
         math.max(2, db.readyFontSize or 12),
         function(v) return "Cooldown: " .. v end,
-        function(v) v = math.floor(v+0.5); db.readyFontSize = v; RebuildBars(); return v end)
+        function(v)
+            v = math.floor(v + 0.5); db.readyFontSize = v; RebuildBars(); return v
+        end)
     yL = yL - 44
     BS("LOXX_Blizz_ReadyFont", panel, LSL, yL, 2, 32, 1,
         math.max(2, db.readyTextSize or 12),
         function(v) return "Ready: " .. v end,
-        function(v) v = math.floor(v+0.5); db.readyTextSize = v; RebuildBars(); return v end)
+        function(v)
+            v = math.floor(v + 0.5); db.readyTextSize = v; RebuildBars(); return v
+        end)
 
     -- ── RIGHT COLUMN ─────────────────────────────────────────────────────────
     local yR = -66
 
-    BH("SHOW IN", RX, yR) ; yR = yR - 22
-    BC("Dungeons (M+ & Heroic)", "showInDungeon",   RX, yR) ; yR = yR - 24
-    BC("Open World",             "showInOpenWorld",  RX, yR) ; yR = yR - 24
-    BC("Arena",                  "showInArena",      RX, yR) ; yR = yR - 36
+    BH("SHOW IN", RX, yR); yR = yR - 22
+    BC("Dungeons (M+ & Heroic)", "showInDungeon", RX, yR); yR = yR - 24
+    BC("Open World", "showInOpenWorld", RX, yR); yR = yR - 24
+    BC("Arena", "showInArena", RX, yR); yR = yR - 36
 
-    BH("SIZE", RX, yR) ; yR = yR - 22
+    BH("SIZE", RX, yR); yR = yR - 22
     BS("LOXX_Blizz_Width", panel, RSL, yR, 120, 400, 10,
         db.frameWidth or 180,
         function(v) return "Width: " .. v .. "px" end,
-        function(v) v = math.floor(v/10+0.5)*10; db.frameWidth = v; RebuildBars(); return v end)
+        function(v)
+            v = math.floor(v / 10 + 0.5) * 10; db.frameWidth = v; RebuildBars(); return v
+        end)
     yR = yR - 44
     BS("LOXX_Blizz_Height", panel, RSL, yR, 14, 50, 1,
         db.barHeight or 20,
         function(v) return "Height: " .. v .. "px" end,
-        function(v) v = math.floor(v+0.5); db.barHeight = v; RebuildBars(); return v end)
+        function(v)
+            v = math.floor(v + 0.5); db.barHeight = v; RebuildBars(); return v
+        end)
     yR = yR - 44
 
-    BH("OPACITY", RX, yR) ; yR = yR - 22
+    BH("OPACITY", RX, yR); yR = yR - 22
     BS("LOXX_Blizz_Alpha", panel, RSL, yR, 0.3, 1.0, 0.05,
         db.alpha or 0.9,
         function(v) return string.format("Opacity: %.0f%%", v * 100) end,
@@ -3226,20 +3371,20 @@ local function Initialize()
         end
         -- v4: growUp removed; reset sizes to new compact defaults
         if savedVer < 4 then
-            db.growUp      = nil
-            db.barHeight   = DEFAULTS.barHeight
-            db.frameWidth  = DEFAULTS.frameWidth
+            db.growUp     = nil
+            db.barHeight  = DEFAULTS.barHeight
+            db.frameWidth = DEFAULTS.frameWidth
         end
     end
-    db.dbVersion = LOXX_DB_VERSION
+    db.dbVersion                 = LOXX_DB_VERSION
 
     -- Persistent storage outside db (not subject to DEFAULTS migrations)
     LOXXSavedVars.loxxRunHistory = LOXXSavedVars.loxxRunHistory or {}
-    LOXXSavedVars.loxxErrorLog   = LOXXSavedVars.loxxErrorLog   or {}
-    loxxErrorLog = LOXXSavedVars.loxxErrorLog
+    LOXXSavedVars.loxxErrorLog   = LOXXSavedVars.loxxErrorLog or {}
+    loxxErrorLog                 = LOXXSavedVars.loxxErrorLog
 
     -- Account-wide storage (position shared across all characters)
-    LOXXAccountVars = LOXXAccountVars or {}
+    LOXXAccountVars              = LOXXAccountVars or {}
 
     pcall(C_ChatInfo.RegisterAddonMessagePrefix, MSG_PREFIX)
 
@@ -3315,7 +3460,8 @@ playerCastFrame:SetScript("OnEvent", function(_, _, unit, castGUID, spellID)
         local isExtra = myExtraKicks[spellID] and "YES" or "no"
         DLog("SELF", "spellID=" .. tostring(spellID) .. " interrupt=" .. isInterrupt .. " extra=" .. isExtra)
         if spyMode then
-            print("|cFF00DDDD[SPY]|r PLAYER cast spellID=" .. tostring(spellID) .. " interrupt=" .. isInterrupt .. " extra=" .. isExtra)
+            print("|cFF00DDDD[SPY]|r PLAYER cast spellID=" ..
+                tostring(spellID) .. " interrupt=" .. isInterrupt .. " extra=" .. isExtra)
         end
     end
 
@@ -3420,7 +3566,8 @@ local function OnMobInterrupted(unit)
 
         DLog("CORR", bestName .. " matched delta=" .. string.format("%.3f", bestDelta) .. "s")
         if spyMode then
-            print("  |cFF00FF00>>> " .. bestName .. " kicked successfully! (delta=" .. string.format("%.3f", bestDelta) .. "s)|r")
+            print("  |cFF00FF00>>> " ..
+                bestName .. " kicked successfully! (delta=" .. string.format("%.3f", bestDelta) .. "s)|r")
         end
 
         if partyAddonUsers[bestName] then
@@ -3435,15 +3582,18 @@ local function OnMobInterrupted(unit)
                 local newCdEnd = info.cdEnd - info.onKickReduction
                 if newCdEnd < now then newCdEnd = now end
                 info.cdEnd = newCdEnd
-                DLog("KICK", bestName .. " Coldthirst -" .. info.onKickReduction .. "s → rem=" .. string.format("%.0f", newCdEnd - now) .. "s")
+                DLog("KICK",
+                    bestName ..
+                    " Coldthirst -" .. info.onKickReduction .. "s → rem=" .. string.format("%.0f", newCdEnd - now) .. "s")
                 if spyMode then
                     local rem = newCdEnd - now
-                    print("  |cFFFFFF00Coldthirst! CD reduced by " .. info.onKickReduction .. "s → " .. string.format("%.0f", rem) .. "s remaining|r")
+                    print("  |cFFFFFF00Coldthirst! CD reduced by " ..
+                        info.onKickReduction .. "s → " .. string.format("%.0f", rem) .. "s remaining|r")
                 end
             end
         else
             -- Auto-register via class (non-addon user)
-            RecordKick(bestName)  -- only here: addon users are counted via OnAddonMessage CAST
+            RecordKick(bestName) -- only here: addon users are counted via OnAddonMessage CAST
             if not noInterruptPlayers[bestName] then
                 for idx = 1, 4 do
                     local u = "party" .. idx
@@ -3472,7 +3622,8 @@ local function OnMobInterrupted(unit)
     else
         DLog("CORR", "NO MATCH best=" .. tostring(bestName) .. " delta=" .. string.format("%.3f", bestDelta))
         if spyMode then
-            print("  No matching party cast (best=" .. tostring(bestName) .. " delta=" .. string.format("%.3f", bestDelta) .. ")")
+            print("  No matching party cast (best=" ..
+                tostring(bestName) .. " delta=" .. string.format("%.3f", bestDelta) .. ")")
         end
     end
 end
@@ -3481,6 +3632,9 @@ end
 -- and nameplate units (handled below).
 local mobInterruptFrame = CreateFrame("Frame")
 mobInterruptFrame:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED",
+    "target", "focus",
+    "boss1", "boss2", "boss3", "boss4", "boss5")
+mobInterruptFrame:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP",
     "target", "focus",
     "boss1", "boss2", "boss3", "boss4", "boss5")
 mobInterruptFrame:SetScript("OnEvent", function(self, event, unit)
@@ -3494,6 +3648,7 @@ for i = 1, 40 do
     local unit = "nameplate" .. i
     nameplateCastFrames[unit] = CreateFrame("Frame")
     nameplateCastFrames[unit]:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", unit)
+    nameplateCastFrames[unit]:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", unit)
     nameplateCastFrames[unit]:SetScript("OnEvent", function(_, _, eUnit)
         OnMobInterrupted(eUnit)
     end)
@@ -3519,7 +3674,7 @@ RegisterPartyWatchers = function()
                     local info = partyAddonUsers[cleanName]
                     local kickOnCd = info and info.cdEnd and (info.cdEnd > GetTime() + 0.5)
                     if not kickOnCd then
-                        local canKick = info ~= nil  -- already a tracked kicker
+                        local canKick = info ~= nil -- already a tracked kicker
                         if not canKick then
                             local _, cls = UnitClass(unit)
                             local role = UnitGroupRolesAssigned(unit)
@@ -3528,7 +3683,7 @@ RegisterPartyWatchers = function()
                             -- role isn't explicitly assigned but who don't reliably interrupt.
                             local isHealerOrMW = (role == "HEALER") or UnitIsMistweaver(unit)
                             canKick = cls and CLASS_INTERRUPTS[cls] and
-                                      not (isHealerOrMW and not HEALER_KEEPS_KICK[cls])
+                                not (isHealerOrMW and not HEALER_KEEPS_KICK[cls])
                         end
                         if canKick then
                             recentPartyCasts[cleanName] = GetTime()
@@ -3588,7 +3743,8 @@ RegisterPartyWatchers = function()
                     DLog("PET", tostring(cleanName) .. (skipped and " SKIP(CD)" or " stored"))
                     if spyMode then
                         local suffix = skipped and " — SKIPPED (kick on CD)" or " — timestamp stored"
-                        print("|cFF00DDDD[SPY]|r PET SUCCEEDED partypet" .. i .. " (owner=" .. tostring(cleanName) .. ")" .. suffix)
+                        print("|cFF00DDDD[SPY]|r PET SUCCEEDED partypet" ..
+                            i .. " (owner=" .. tostring(cleanName) .. ")" .. suffix)
                     end
                 end
             end)
@@ -3601,7 +3757,7 @@ ef:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
         Initialize()
     elseif event == "CHAT_MSG_ADDON" or event == "CHAT_MSG_ADDON_LOGGED" then
         OnAddonMessage(arg1, arg2, arg3, arg4)
-    -- SPELL_UPDATE_COOLDOWN removed (restricted in Midnight)
+        -- SPELL_UPDATE_COOLDOWN removed (restricted in Midnight)
     elseif event == "SPELLS_CHANGED" then
         FindMyInterrupt()
         AnnounceJoin()
@@ -3622,7 +3778,7 @@ ef:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
             if not ok and spyMode then
                 print("|cFFFF0000[SPY]|r Inspect scan error: " .. tostring(err))
             end
-            SetDisplayDirty()  -- spec/talents may have changed kick or added extra kicks
+            SetDisplayDirty() -- spec/talents may have changed kick or added extra kicks
             ClearInspectPlayer()
             inspectBusy = false
             inspectUnit = nil
@@ -3703,13 +3859,13 @@ ef:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
         CleanPartyList()
         RegisterPartyWatchers()
         AutoRegisterPartyByClass()
-        CheckZoneVisibility()   -- hide/show based on group size (raid = 6+)
+        CheckZoneVisibility() -- hide/show based on group size (raid = 6+)
         -- Rebuild bars if group size changed category (5 → 10 → 20 → 40)
         if UpdateMaxBars() then RebuildBars() end
         -- Queue inspect for new members (1s delay for units to be ready)
         C_Timer.After(1, QueuePartyInspect)
     elseif event == "PLAYER_ENTERING_WORLD" then
-        inCombat = InCombatLockdown()  -- vrai si reload UI en combat
+        inCombat = InCombatLockdown() -- vrai si reload UI en combat
         pcall(C_ChatInfo.RegisterAddonMessagePrefix, MSG_PREFIX)
         CheckZoneVisibility()
         RegisterPartyWatchers()
@@ -3735,18 +3891,25 @@ ef:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
         loxxDungeonLog = {}
         loxxDungeonLogActive = true
         local party = {}
-        for i = 1, 4 do
-            local u = "party" .. i
+        local units = { "player", "party1", "party2", "party3", "party4" }
+        for _, u in ipairs(units) do
             if UnitExists(u) then
                 local n = UnitName(u) or "?"
                 local _, cls = UnitClass(u)
-                table.insert(party, n .. "(" .. (cls or "?") .. ")")
+                local specID = GetInspectSpecialization(u) or 0
+                local specName = "?"
+                if specID > 0 then
+                    local _, sn = GetSpecializationInfoByID(specID)
+                    specName = sn or "?"
+                end
+                table.insert(party, n .. "(" .. (cls or "?") .. ":" .. specName .. ")")
+                DLog("PARTY", n .. " | " .. (cls or "?") .. " | " .. specName .. " (" .. specID .. ")")
             end
         end
         DLog("START", "M+ key started — party: " .. (next(party) and table.concat(party, ", ") or "solo"))
         print("|cFF00DDDD[LOXX]|r Dungeon log started. /loxx record show to view.")
     elseif event == "PLAYER_LOGOUT" then
-        ArchiveCurrentRun()  -- persist current run even if no new run started
+        ArchiveCurrentRun() -- persist current run even if no new run started
         if mainFrame then LoxxSaveFramePosition(mainFrame) end
     end
 end)
