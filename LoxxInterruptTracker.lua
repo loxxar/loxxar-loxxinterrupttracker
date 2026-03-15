@@ -14,7 +14,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.3.1.2"
+local LOXX_VERSION = "1.3.1.3"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -234,6 +234,7 @@ local CLASS_INTERRUPTS         = {
     MONK        = { id = 116705, cd = 15, name = "Spear Hand Strike" },
     WARLOCK     = { id = 19647, cd = 24, name = "Spell Lock" },
     EVOKER      = { id = 351338, cd = 20, name = "Quell" },
+    PRIEST      = { id = 15487,  cd = 45, name = "Silence" }, -- Shadow only; Disc/Holy removed via SPEC_NO_INTERRUPT on inspect
 }
 
 -- SpecID → interrupt override (when spec changes the interrupt or CD)
@@ -742,7 +743,33 @@ local function ScanInspectTalents(unit)
     local name = UnitName(unit)
     if not name then return end
     local info = partyAddonUsers[name]
-    if not info then return end
+    if not info then
+        -- Player may be in noInterruptPlayers due to wrong group role (e.g. Shadow Priest
+        -- assigned HEALER role). If inspect reveals a spec that CAN kick, rescue them.
+        if noInterruptPlayers[name] then
+            local specID = GetInspectSpecialization(unit)
+            if specID and specID > 0 and not SPEC_NO_INTERRUPT[specID] then
+                local _, cls = UnitClass(unit)
+                if cls and CLASS_INTERRUPTS[cls] then
+                    noInterruptPlayers[name] = nil
+                    local kickInfo = GetClassKickInfo(cls, unit)
+                    partyAddonUsers[name] = {
+                        class = cls,
+                        spellID = kickInfo.id,
+                        baseCd = kickInfo.cd,
+                        cdEnd = 0,
+                    }
+                    SetDisplayDirty()
+                    if spyMode then
+                        print("|cFF00DDDD[SPY]|r Rescued " .. name ..
+                            " from noInterrupt (specID=" .. specID .. ") → " .. kickInfo.name)
+                    end
+                    info = partyAddonUsers[name]
+                end
+            end
+        end
+        if not info then return end
+    end
 
     -- 1) Get spec → override interrupt if needed, or remove if no interrupt
     local specID = GetInspectSpecialization(unit)
@@ -2476,11 +2503,7 @@ local function CreateConfigPanel()
     commandsBtn:SetPoint("RIGHT", statsBtn, "LEFT", -10, 0)
     commandsBtn:SetText(L["BTN_COMMANDS"])
     commandsBtn:SetScript("OnClick", function()
-        if SlashCmdList and SlashCmdList["LOXX"] then
-            SlashCmdList["LOXX"]("help")
-        else
-            print("|cFF00DDDD[LOXX]|r /loxx help")
-        end
+        print("|cFF00DDDD[LOXX]|r /loxx")
     end)
 
     local footerMsg = footerBand:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -2872,7 +2895,7 @@ local function SetupSlash()
             print("|cFF00DDDD[LOXX]|r " .. L["CMD_LOG_CLEAR"])
         elseif cmd == "help" then
             print(
-                "|cFF00DDDD[LOXX]|r /loxx, /loxx config|options|settings, show, hide, lock, unlock, test, stats, stats clear, logs, logs clear, record, record show, record clear, ping, spy, pos, debug, help")
+                "|cFF00DDDD[LOXX]|r /loxx")
         else
             -- Default: open config
             CreateConfigPanel()
