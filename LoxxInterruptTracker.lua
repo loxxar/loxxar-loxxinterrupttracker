@@ -14,7 +14,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.3.1.3"
+local LOXX_VERSION = "1.3.1.4"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -202,7 +202,7 @@ local statsFrame           = nil -- stats window
 local loxxErrorLog         = {}
 local loxxDungeonLog       = {}
 local loxxDungeonLogActive = false
-local DUNGEON_LOG_MAX      = 600
+local DUNGEON_LOG_MAX      = 10000
 local dungeonLogFrame      = nil
 local loxxLastErr          = ""
 local loxxErrCount         = 0
@@ -212,6 +212,113 @@ local ALL_INTERRUPTS_STR   = {}
 for id, data in pairs(ALL_INTERRUPTS) do
     ALL_INTERRUPTS_STR[tostring(id)] = data
 end
+
+
+-- Crowd Control spells by spell ID.
+-- Used to detect SELF CC casts and log them in the dungeon record.
+-- Party member CCs cannot be detected by spell ID (Midnight 12.0 restriction).
+-- DR categories: Stuns / Disorients / Incapacitates / Roots / Silences / Displacement
+local CC_SPELLS = {
+    -- Death Knight
+    [108194] = { name = "Asphyxiate",           class = "DEATHKNIGHT", dr = "Stuns" },
+    [221562] = { name = "Asphyxiate",           class = "DEATHKNIGHT", dr = "Stuns" }, -- Frost variant
+    [207167] = { name = "Blinding Sleet",        class = "DEATHKNIGHT", dr = "Disorients" },
+    [343094] = { name = "Monstrous Blow",        class = "DEATHKNIGHT", dr = "Stuns" },
+    [315453] = { name = "Frostwyrm's Fury",      class = "DEATHKNIGHT", dr = "Stuns" }, -- Absolute Zero talent
+    [91721]  = { name = "Shambling Rush",        class = "DEATHKNIGHT", dr = "Stuns" },
+    [45524]  = { name = "Chains of Ice",         class = "DEATHKNIGHT", dr = "Roots" },
+
+    -- Demon Hunter
+    [179057] = { name = "Chaos Nova",            class = "DEMONHUNTER", dr = "Stuns" },
+    [217832] = { name = "Imprison",              class = "DEMONHUNTER", dr = "Incapacitates" },
+    [207684] = { name = "Sigil of Misery",       class = "DEMONHUNTER", dr = "Disorients" },
+    [390163] = { name = "Sigil of Spite",        class = "DEMONHUNTER", dr = "Roots" },
+    [202137] = { name = "Sigil of Silence",      class = "DEMONHUNTER", dr = "Silences" },
+    [370965] = { name = "The Hunt",              class = "DEMONHUNTER", dr = "Stuns" },
+
+    -- Druid
+    [5211]   = { name = "Mighty Bash",           class = "DRUID", dr = "Stuns" },
+    [22570]  = { name = "Maim",                  class = "DRUID", dr = "Incapacitates" },
+    [33786]  = { name = "Cyclone",               class = "DRUID", dr = "Disorients" },
+    [99]     = { name = "Incapacitating Roar",   class = "DRUID", dr = "Incapacitates" },
+    [339]    = { name = "Entangling Roots",       class = "DRUID", dr = "Roots" },
+    [2637]   = { name = "Hibernate",             class = "DRUID", dr = "Incapacitates" },
+    [102359] = { name = "Mass Entanglement",      class = "DRUID", dr = "Roots" },
+
+    -- Evoker
+    [358385] = { name = "Landslide",             class = "EVOKER", dr = "Roots" },
+    [360806] = { name = "Sleep Walk",            class = "EVOKER", dr = "Incapacitates" },
+    [372245] = { name = "Terror of the Skies",   class = "EVOKER", dr = "Stuns" },
+
+    -- Hunter
+    [19577]  = { name = "Intimidation",          class = "HUNTER", dr = "Stuns" },
+    [187650] = { name = "Freezing Trap",         class = "HUNTER", dr = "Incapacitates" },
+    [109248] = { name = "Binding Shot",          class = "HUNTER", dr = "Roots" },
+    [162480] = { name = "Steel Trap",            class = "HUNTER", dr = "Roots" },
+    [1513]   = { name = "Scare Beast",           class = "HUNTER", dr = "Disorients" },
+    [190925] = { name = "Harpoon",               class = "HUNTER", dr = "Roots" },
+
+    -- Mage
+    [118]    = { name = "Polymorph",             class = "MAGE", dr = "Disorients" },
+    [161355] = { name = "Polymorph (Penguin)",   class = "MAGE", dr = "Disorients" },
+    [28272]  = { name = "Polymorph (Pig)",       class = "MAGE", dr = "Disorients" },
+    [113724] = { name = "Ring of Frost",         class = "MAGE", dr = "Incapacitates" },
+    [31661]  = { name = "Dragon's Breath",       class = "MAGE", dr = "Disorients" },
+    [122]    = { name = "Frost Nova",            class = "MAGE", dr = "Roots" },
+    [228600] = { name = "Glacial Spike",         class = "MAGE", dr = "Roots" },
+    [157997] = { name = "Ice Nova",              class = "MAGE", dr = "Roots" },
+
+    -- Monk
+    [119381] = { name = "Leg Sweep",             class = "MONK", dr = "Stuns" },
+    [115078] = { name = "Paralysis",             class = "MONK", dr = "Incapacitates" },
+    [198909] = { name = "Song of Chi-Ji",        class = "MONK", dr = "Disorients" },
+    [116844] = { name = "Ring of Peace",         class = "MONK", dr = "Displacement" },
+    [116095] = { name = "Disable",               class = "MONK", dr = "Roots" },
+
+    -- Paladin
+    [853]    = { name = "Hammer of Justice",     class = "PALADIN", dr = "Stuns" },
+    [115750] = { name = "Blinding Light",        class = "PALADIN", dr = "Disorients" },
+    [255937] = { name = "Wake of Ashes",         class = "PALADIN", dr = "Incapacitates" },
+    [10326]  = { name = "Turn Evil",             class = "PALADIN", dr = "Disorients" },
+
+    -- Priest
+    [8122]   = { name = "Psychic Scream",        class = "PRIEST", dr = "Disorients" },
+    [605]    = { name = "Mind Control",          class = "PRIEST", dr = "Disorients" },
+    [64044]  = { name = "Psychic Horror",        class = "PRIEST", dr = "Stuns" },
+    [88625]  = { name = "Holy Word: Chastise",   class = "PRIEST", dr = "Incapacitates" },
+    [108920] = { name = "Void Tendrils",         class = "PRIEST", dr = "Roots" },
+    [9484]   = { name = "Shackle Undead",        class = "PRIEST", dr = "Incapacitates" },
+
+    -- Rogue
+    [408]    = { name = "Kidney Shot",           class = "ROGUE", dr = "Stuns" },
+    [1833]   = { name = "Cheap Shot",            class = "ROGUE", dr = "Stuns" },
+    [6770]   = { name = "Sap",                   class = "ROGUE", dr = "Disorients" },
+    [2094]   = { name = "Blind",                 class = "ROGUE", dr = "Disorients" },
+    [1776]   = { name = "Gouge",                 class = "ROGUE", dr = "Incapacitates" },
+
+    -- Shaman
+    [192058] = { name = "Capacitor Totem",       class = "SHAMAN", dr = "Stuns" },
+    [51514]  = { name = "Hex",                   class = "SHAMAN", dr = "Disorients" },
+    [210873] = { name = "Hex (Compy)",           class = "SHAMAN", dr = "Disorients" },
+    [211004] = { name = "Hex (Snake)",           class = "SHAMAN", dr = "Disorients" },
+    [305485] = { name = "Lightning Lasso",       class = "SHAMAN", dr = "Stuns" },
+    [197214] = { name = "Sundering",             class = "SHAMAN", dr = "Incapacitates" },
+    [51485]  = { name = "Earthgrab Totem",       class = "SHAMAN", dr = "Roots" },
+
+    -- Warlock
+    [5782]   = { name = "Fear",                  class = "WARLOCK", dr = "Disorients" },
+    [30283]  = { name = "Shadowfury",            class = "WARLOCK", dr = "Stuns" },
+    [89766]  = { name = "Axe Toss",              class = "WARLOCK", dr = "Stuns" },
+    [6789]   = { name = "Mortal Coil",           class = "WARLOCK", dr = "Incapacitates" },
+    [710]    = { name = "Banish",                class = "WARLOCK", dr = "Incapacitates" },
+    [6358]   = { name = "Seduction",             class = "WARLOCK", dr = "Disorients" },
+    [5484]   = { name = "Howl of Terror",        class = "WARLOCK", dr = "Disorients" },
+
+    -- Warrior
+    [107570] = { name = "Storm Bolt",            class = "WARRIOR", dr = "Stuns" },
+    [46968]  = { name = "Shockwave",             class = "WARRIOR", dr = "Stuns" },
+    [5246]   = { name = "Intimidating Shout",    class = "WARRIOR", dr = "Disorients" },
+}
 
 -- String-keyed versions of talent tables.
 -- C_Traits.GetDefinitionInfo returns defInfo.spellID as a secret value in WoW 12.0+,
@@ -2836,12 +2943,18 @@ local function SetupSlash()
                 -- Header
                 local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
                 title:SetPoint("TOP", f, "TOP", 0, -16)
+                local DISPLAY_MAX = 2000
+                local total = #loxxDungeonLog
                 title:SetText("|cFF00DDDDLoxx Dungeon Log|r — " ..
-                    #loxxDungeonLog .. " entries" .. (loxxDungeonLogActive and " |cFF00FF00[LIVE]|r" or ""))
+                    total .. " entries" .. (loxxDungeonLogActive and " |cFF00FF00[LIVE]|r" or ""))
                 -- Hint
                 local hint = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
                 hint:SetPoint("TOP", title, "BOTTOM", 0, -4)
-                hint:SetText("Click inside the text area, then Ctrl+A / Ctrl+C to copy all")
+                local hintText = "Click inside the text area, then Ctrl+A / Ctrl+C to copy all"
+                if total > DISPLAY_MAX then
+                    hintText = "Showing last " .. DISPLAY_MAX .. " of " .. total .. " — " .. hintText
+                end
+                hint:SetText(hintText)
                 hint:SetTextColor(0.7, 0.7, 0.7)
                 -- Close button
                 local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
@@ -2863,10 +2976,11 @@ local function SetupSlash()
                     f:Hide(); dungeonLogFrame = nil
                 end)
                 sf:SetScrollChild(eb)
-                -- Fill text
-                local lines = table.concat(loxxDungeonLog, "\n")
-                eb:SetText(lines)
-                -- Resize EditBox to fit content
+                -- Fill text: display only the last DISPLAY_MAX entries to avoid UI freeze
+                local startIdx = math.max(1, total - DISPLAY_MAX + 1)
+                local slice = {}
+                for i = startIdx, total do slice[#slice + 1] = loxxDungeonLog[i] end
+                eb:SetText(table.concat(slice, "\n"))
                 eb:SetWidth(sf:GetWidth())
                 f:Show()
             end
@@ -3482,9 +3596,17 @@ playerCastFrame:SetScript("OnEvent", function(_, _, unit, castGUID, spellID)
         local isInterrupt = ALL_INTERRUPTS[spellID] and "YES" or "no"
         local isExtra = myExtraKicks[spellID] and "YES" or "no"
         DLog("SELF", "spellID=" .. tostring(spellID) .. " interrupt=" .. isInterrupt .. " extra=" .. isExtra)
+        -- Detect self CC casts and log them silently
+        local ccData = CC_SPELLS[spellID]
+        if ccData then
+            DLog("CC_SELF", ccData.name .. " (" .. ccData.dr .. ") spellID=" .. tostring(spellID))
+        end
         if spyMode then
             print("|cFF00DDDD[SPY]|r PLAYER cast spellID=" ..
                 tostring(spellID) .. " interrupt=" .. isInterrupt .. " extra=" .. isExtra)
+            if ccData then
+                print("|cFF00DDDD[SPY]|r   → CC: " .. ccData.name .. " [" .. ccData.dr .. "]")
+            end
         end
     end
 
@@ -3651,17 +3773,51 @@ local function OnMobInterrupted(unit)
     end
 end
 
+-- Channel start: record expected end time so CHANNEL_STOP can distinguish
+-- interrupted channels from naturally-completed ones.
+local function OnMobChannelStart(unit)
+    local ok, _, _, _, startTimeMs, endTimeMs = pcall(GetUnitChannelInfo, unit)
+    if ok and endTimeMs and endTimeMs > 0 then
+        activeChannels[unit] = endTimeMs / 1000
+    end
+end
+
+-- Channel stop: only treat as an interrupt if the channel was cut short.
+-- Returns true if OnMobInterrupted was called (kick may have been attributed).
+local function OnMobChannelStop(unit)
+    local expectedEnd = activeChannels[unit]
+    activeChannels[unit] = nil
+    if expectedEnd and (GetTime() < expectedEnd - 0.3) then
+        -- Channel cut short — could be a kick or a CC (stun, fear, poly, etc.)
+        -- Call the correlation engine; if no kicker is found it will log NO MATCH.
+        -- We log a CC entry here so the dungeon log captures it regardless.
+        DLog("CC", "channel cut short on " .. tostring(unit) ..
+            " (rem=" .. string.format("%.1f", expectedEnd - GetTime()) .. "s)")
+        OnMobInterrupted(unit)
+    end
+    -- else: natural end — ignore entirely
+end
+
 -- Mob interrupt detection: target, focus, boss units (always tracked in instances),
 -- and nameplate units (handled below).
 local mobInterruptFrame = CreateFrame("Frame")
 mobInterruptFrame:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED",
     "target", "focus",
     "boss1", "boss2", "boss3", "boss4", "boss5")
+mobInterruptFrame:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START",
+    "target", "focus",
+    "boss1", "boss2", "boss3", "boss4", "boss5")
 mobInterruptFrame:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP",
     "target", "focus",
     "boss1", "boss2", "boss3", "boss4", "boss5")
 mobInterruptFrame:SetScript("OnEvent", function(self, event, unit)
-    OnMobInterrupted(unit)
+    if event == "UNIT_SPELLCAST_INTERRUPTED" then
+        OnMobInterrupted(unit)
+    elseif event == "UNIT_SPELLCAST_CHANNEL_START" then
+        OnMobChannelStart(unit)
+    elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" then
+        OnMobChannelStop(unit)
+    end
 end)
 
 -- Nameplate interrupt tracking: pre-create all 40 frames at load time (no leaks)
@@ -3671,9 +3827,16 @@ for i = 1, 40 do
     local unit = "nameplate" .. i
     nameplateCastFrames[unit] = CreateFrame("Frame")
     nameplateCastFrames[unit]:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", unit)
+    nameplateCastFrames[unit]:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", unit)
     nameplateCastFrames[unit]:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", unit)
-    nameplateCastFrames[unit]:SetScript("OnEvent", function(_, _, eUnit)
-        OnMobInterrupted(eUnit)
+    nameplateCastFrames[unit]:SetScript("OnEvent", function(_, event, eUnit)
+        if event == "UNIT_SPELLCAST_INTERRUPTED" then
+            OnMobInterrupted(eUnit)
+        elseif event == "UNIT_SPELLCAST_CHANNEL_START" then
+            OnMobChannelStart(eUnit)
+        elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" then
+            OnMobChannelStop(eUnit)
+        end
     end)
 end
 
@@ -3749,8 +3912,9 @@ RegisterPartyWatchers = function()
                 local cleanOwner = "party" .. i
                 local cleanName = UnitName(cleanOwner)
 
-                -- Store timestamp for correlation only if owner's kick is not already on CD.
-                if cleanName then
+                -- Store timestamp for correlation only if owner's kick is not already on CD
+                -- and the owner is not a known non-kicker (healer, etc.).
+                if cleanName and not noInterruptPlayers[cleanName] then
                     local info = partyAddonUsers[cleanName]
                     local kickOnCd = info and info.cdEnd and (info.cdEnd > GetTime() + 0.5)
                     if not kickOnCd then
