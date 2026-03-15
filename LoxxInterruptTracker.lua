@@ -14,7 +14,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.3.1.4"
+local LOXX_VERSION = "1.3.1.5"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -3668,6 +3668,7 @@ end)
 
 -- Track recent party casts for correlation (timestamp per player name)
 local recentPartyCasts = {}
+local activeChannels = {} -- unit → expected channel endTime (for CHANNEL_STOP early-end detection)
 
 -- Dedup: track last successful correlation to avoid double-counting when
 -- both nameplate and target frames fire for the same mob (within 0.1s)
