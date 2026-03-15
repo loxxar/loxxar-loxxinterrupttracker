@@ -14,7 +14,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.3.1.6"
+local LOXX_VERSION = "1.3.1.7"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -559,6 +559,8 @@ end
 -- Communication
 ------------------------------------------------------------
 local function SendLOXX(msg)
+    -- Don't send when solo: PARTY/INSTANCE_CHAT would print "You are not in a group."
+    if not IsInGroup() then return end
     -- Pick the correct channel BEFORE sending to avoid system error messages.
     -- PARTY works outside instances; INSTANCE_CHAT works inside M+/raids.
     local inInstance = IsInInstance()
@@ -1368,6 +1370,11 @@ end
 local function UpdateAlertBand(numVisible, now)
     if not mainFrame.alertBand then return 0 end
     if numVisible == 0 or db.showKicksReadyBar == false then
+        mainFrame.alertBand:Hide()
+        return 0
+    end
+    -- Hide when solo: no party = alert band is meaningless
+    if GetNumGroupMembers() == 0 then
         mainFrame.alertBand:Hide()
         return 0
     end
