@@ -4,6 +4,16 @@
 ]]
 
 LOXX_CHANGELOG = [[
+|cFFFFD100v1.3.3|r
+• Stats: filter history by current character or view all characters
+• Stats: missed kicks now tracked and displayed per player per run
+• Tooltip: shows player name and class color above the interrupt spell name
+
+|cFFFFD100v1.3.2|r
+• Self interrupts now correctly attributed in dungeon logs and correlation engine
+• Skull Bash, Wind Shear, and all personal interrupts now tracked when self-cast
+• Extra personal kicks (Kick, Pummel, etc.) also attributed correctly
+
 |cFFFFD100v1.3.1|r
 • Fixed party member interrupt cooldowns not updating after kicks
 • Fixed duplicate kick detection when nameplate and target fire simultaneously

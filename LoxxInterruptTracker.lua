@@ -14,7 +14,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.3.1.7"
+local LOXX_VERSION = "1.3.3"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -177,9 +177,11 @@ local myClass, myName, mySpellID
 local myCachedCD
 local myBaseCd                     -- real base CD from spellbook (with talents)
 local myKickCdEnd          = 0     -- clean tracking of our own kick CD
+local selfKickTime         = 0     -- timestamp of our last interrupt cast (for MOB INTERRUPTED correlation)
 local myIsPetSpell         = false -- is our primary kick a pet spell?
 local myExtraKicks         = {}    -- extra kicks for own player {spellID → {baseCd, cdEnd}}
 local partyAddonUsers      = {}
+local recentPartyCasts     = {}    -- name → timestamp of last interrupt cast (for MOB INTERRUPTED correlation)
 local bars                 = {}
 local cachedPartyEntries   = {}    -- reused table; rebuilt only when displayDirty=true
 local displayDirty         = true  -- true = rebuild cachedPartyEntries from scratch next tick
@@ -196,6 +198,7 @@ local inCombat             = false
 local spyMode              = false
 -- Forward declarations: defined later in the stats block but called earlier
 local RecordKick
+local RecordMissedKick
 local loxxCurrentRun       = nil -- stats: current instance run
 local statsFrame           = nil -- stats window
 -- Error log (in-memory, also persisted via SavedVars)
@@ -746,6 +749,14 @@ local function OnSpellCastSucceeded(unit, castGUID, spellID, isParty, cleanName)
     -- Check if it's an extra kick
     if myExtraKicks[spellID] then
         myExtraKicks[spellID].cdEnd = GetTime() + myExtraKicks[spellID].baseCd
+        selfKickTime = GetTime()
+        local capturedTime = selfKickTime
+        C_Timer.After(1.5, function()
+            if selfKickTime == capturedTime and selfKickTime > 0 then
+                selfKickTime = 0
+                RecordMissedKick(myName)
+            end
+        end)
         if spyMode then
             print("|cFF00DDDD[SPY]|r Own extra kick: " ..
                 (myExtraKicks[spellID].name or "?") .. " CD=" .. myExtraKicks[spellID].baseCd)
@@ -757,6 +768,14 @@ local function OnSpellCastSucceeded(unit, castGUID, spellID, isParty, cleanName)
     if mySpellID and spellID ~= mySpellID then
         local data = ALL_INTERRUPTS[spellID]
         myExtraKicks[spellID] = { baseCd = data.cd, cdEnd = GetTime() + data.cd }
+        selfKickTime = GetTime()
+        local capturedTime = selfKickTime
+        C_Timer.After(1.5, function()
+            if selfKickTime == capturedTime and selfKickTime > 0 then
+                selfKickTime = 0
+                RecordMissedKick(myName)
+            end
+        end)
         if spyMode then
             print("|cFF00DDDD[SPY]|r Auto-added extra kick: " .. data.name .. " CD=" .. data.cd)
         end
@@ -765,6 +784,14 @@ local function OnSpellCastSucceeded(unit, castGUID, spellID, isParty, cleanName)
 
     local cd = myCachedCD or myBaseCd or ALL_INTERRUPTS[spellID].cd
     myKickCdEnd = GetTime() + cd
+    selfKickTime = GetTime()
+    local capturedSelfKickTime = selfKickTime
+    C_Timer.After(1.5, function()
+        if selfKickTime == capturedSelfKickTime and selfKickTime > 0 then
+            selfKickTime = 0
+            RecordMissedKick(myName)
+        end
+    end)
     SendLOXX("CAST:" .. cd)
     RecordKick(myName)
 end
@@ -825,6 +852,18 @@ local function AutoRegisterPartyByClass()
                             print("|cFF00DDDD[SPY]|r Skipping " ..
                                 name .. " (" .. cls .. " no-kick spec) - no kick expected")
                         end
+                    elseif cls == "MONK" and UnitPowerType(u) == nil then
+                        -- MONK spec is critical (Mistweaver = no kick, WW/BM = has kick).
+                        -- Power type not yet available → can't safely determine spec.
+                        -- Defer to inspect instead of risking a Mistweaver registration.
+                        if not inspectedPlayers[name] then
+                            table.insert(inspectQueue, u)
+                            C_Timer.After(0.1, ProcessInspectQueue)
+                        end
+                        if spyMode then
+                            print("|cFF00DDDD[SPY]|r " .. name ..
+                                " (MONK) power type unavailable - deferring to inspect")
+                        end
                     else
                         local kickInfo = GetClassKickInfo(cls, u)
                         partyAddonUsers[name] = {
@@ -882,6 +921,26 @@ local function ScanInspectTalents(unit)
 
     -- 1) Get spec → override interrupt if needed, or remove if no interrupt
     local specID = GetInspectSpecialization(unit)
+    -- Fallback for MONK when GetInspectSpecialization returns 0/nil (Midnight 12.0
+    -- inspect data can be unreliable). By the time INSPECT_READY fires, UnitPowerType
+    -- should be valid — use it as secondary spec indicator.
+    if (not specID or specID == 0) and info.class == "MONK" then
+        if UnitIsMistweaver(unit) then
+            partyAddonUsers[name] = nil
+            inspectedPlayers[name] = true
+            noInterruptPlayers[name] = true
+            if spyMode then
+                print("|cFF00DDDD[SPY]|r " .. name ..
+                    " (MONK) specID unavailable but mana detected → Mistweaver, removed")
+            end
+            return
+        end
+        if spyMode then
+            print("|cFF00DDDD[SPY]|r " .. name ..
+                " (MONK) specID unavailable, power type not mana → assuming WW/BM, keeping")
+        end
+    end
+
     if specID and specID > 0 then
         -- Remove talent-checked extra kicks (will be re-added if talent found)
         if info.extraKicks and SPEC_EXTRA_KICKS[specID] then
@@ -1316,11 +1375,15 @@ local function RebuildBars()
             if not self.ttSpellName then return end
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:ClearLines()
-            GameTooltip:AddLine(self.ttSpellName, 1, 1, 1)
+            if self.ttPlayerName then
+                local col = self.ttClassColor or { 1, 1, 1 }
+                GameTooltip:AddLine(self.ttPlayerName, col[1], col[2], col[3])
+            end
+            GameTooltip:AddLine(self.ttSpellName, 1, 0.82, 0)
             if self.ttRem and self.ttRem > 0 then
-                GameTooltip:AddLine(string.format(L["TOOLTIP_CD"], self.ttRem, self.ttBaseCd or 0), 1, 0.82, 0)
+                GameTooltip:AddLine(string.format(L["TOOLTIP_CD"], self.ttRem, self.ttBaseCd or 0), 0.7, 0.7, 0.7)
             else
-                GameTooltip:AddLine(L["TOOLTIP_READY"], 0, 1, 0)
+                GameTooltip:AddLine(L["TOOLTIP_READY"], 0.2, 1.0, 0.2)
             end
             GameTooltip:Show()
         end)
@@ -1494,8 +1557,10 @@ local function UpdateDisplay()
         bar.nameText:SetTextColor(unpack(FONT_COLOR))
         bar.cdBar:SetMinMaxValues(0, baseCd)
         -- Tooltip data
-        bar.ttSpellName = spellName
-        bar.ttBaseCd    = baseCd
+        bar.ttSpellName   = spellName
+        bar.ttBaseCd      = baseCd
+        bar.ttPlayerName  = name
+        bar.ttClassColor  = col
         if rem > 0.5 then
             bar.cdBar:SetValue(rem)
             bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
@@ -1524,8 +1589,10 @@ local function UpdateDisplay()
         local col = CLASS_COLORS[myClass] or { 1, 1, 1 }
         bar.nameText:SetText(myName or "?")
         bar.nameText:SetTextColor(unpack(FONT_COLOR))
-        bar.ttSpellName = mySpellData.name
-        bar.ttBaseCd    = myBaseCd or mySpellData.cd
+        bar.ttSpellName  = mySpellData.name
+        bar.ttBaseCd     = myBaseCd or mySpellData.cd
+        bar.ttPlayerName = myName or "?"
+        bar.ttClassColor = col
 
         if myKickCdEnd > now then
             local cdRemaining = myKickCdEnd - now
@@ -1571,8 +1638,10 @@ local function UpdateDisplay()
             local col = CLASS_COLORS[myClass] or { 1, 1, 1 }
             bar.nameText:SetText(myName or "?")
             bar.nameText:SetTextColor(unpack(FONT_COLOR))
-            bar.ttSpellName = ekInfo.name or (ekData and ekData.name) or "?"
-            bar.ttBaseCd    = ekInfo.baseCd
+            bar.ttSpellName  = ekInfo.name or (ekData and ekData.name) or "?"
+            bar.ttBaseCd     = ekInfo.baseCd
+            bar.ttPlayerName = myName or "?"
+            bar.ttClassColor = col
 
             if ekInfo.cdEnd > now then
                 local ekRem = ekInfo.cdEnd - now
@@ -1709,6 +1778,16 @@ local function UpdateDisplay()
     for i = barIdx, currentMaxBars do bars[i]:Hide() end
 
     local numVisible = barIdx - 1
+
+    -- Hide frame when solo and nothing to show; re-show it as soon as bars appear.
+    if numVisible == 0 and GetNumGroupMembers() == 0 then
+        mainFrame:Hide()
+        return
+    end
+    -- If the frame was hidden by the block above and we now have bars, restore it.
+    if not mainFrame:IsShown() and shouldShowByZone and (not db.hideOutOfCombat or inCombat) then
+        mainFrame:Show()
+    end
 
     -- Show "No kick available" label when the window is empty (healer-only groups, etc.)
     if mainFrame.noKickLabel then
@@ -2633,6 +2712,7 @@ local function CreateConfigPanel()
     configFrame:Show()
 end
 
+
 ------------------------------------------------------------
 -- Create main frame + resize handle (from ADDON_LOADED)
 ------------------------------------------------------------
@@ -3058,6 +3138,7 @@ local function StartNewRun()
         instanceType = instanceType,
         keyLevel     = keyLevel,
         date         = date("%Y-%m-%d %H:%M"),
+        character    = UnitName("player") or "Unknown",
         startTime    = GetTime(),
         players      = {},
     }
@@ -3069,18 +3150,27 @@ RecordKick = function(playerName)
     loxxCurrentRun.players[playerName] = (loxxCurrentRun.players[playerName] or 0) + 1
 end
 
+RecordMissedKick = function(playerName)
+    if not loxxCurrentRun then return end
+    if not IsInInstance() then return end
+    loxxCurrentRun.missedKicks = loxxCurrentRun.missedKicks or {}
+    loxxCurrentRun.missedKicks[playerName] = (loxxCurrentRun.missedKicks[playerName] or 0) + 1
+    DLog("MISS", playerName .. " missed kick (no interrupt within 1.5s)")
+end
+
 -------------------------------------------------------------
 -- Stats window (same design as Changelog, attached to the left of Settings)
 ------------------------------------------------------------
-ShowStatsWindow = function()
-    if statsFrame and statsFrame:IsShown() then
+ShowStatsWindow = function(charFilterOverride)
+    if statsFrame and statsFrame:IsShown() and charFilterOverride == nil then
         statsFrame:Hide()
         statsFrame = nil
         return
     end
-    if statsFrame then statsFrame = nil end
+    if statsFrame then statsFrame:Hide(); statsFrame = nil end
 
-    local SW, SH = 380, 520
+    local filterByChar = charFilterOverride  -- nil = all chars, string = filter to that char
+    local SW, SH = 380, 540
 
     -- ── Helpers ──────────────────────────────────────────────────
     local function FormatDuration(secs)
@@ -3098,19 +3188,24 @@ ShowStatsWindow = function()
     end
 
     -- Aggregate kick totals across current run + all history
-    local function ComputeTotals()
+    -- charFilter: if set, only include runs played by that character
+    local function ComputeTotals(charFilter)
         local totals = {}
         local runCount = 0
         if loxxCurrentRun and next(loxxCurrentRun.players) then
-            runCount = runCount + 1
-            for name, kicks in pairs(loxxCurrentRun.players) do
-                totals[name] = (totals[name] or 0) + kicks
+            if not charFilter or loxxCurrentRun.character == charFilter then
+                runCount = runCount + 1
+                for name, kicks in pairs(loxxCurrentRun.players) do
+                    totals[name] = (totals[name] or 0) + kicks
+                end
             end
         end
         for _, run in ipairs(LOXXSavedVars.loxxRunHistory or {}) do
-            runCount = runCount + 1
-            for name, kicks in pairs(run.players) do
-                totals[name] = (totals[name] or 0) + kicks
+            if not charFilter or run.character == charFilter then
+                runCount = runCount + 1
+                for name, kicks in pairs(run.players) do
+                    totals[name] = (totals[name] or 0) + kicks
+                end
             end
         end
         local t = {}
@@ -3188,9 +3283,34 @@ ShowStatsWindow = function()
     footerLine:SetPoint("BOTTOMLEFT", sf, "BOTTOMLEFT", 0, 38)
     footerLine:SetPoint("BOTTOMRIGHT", sf, "BOTTOMRIGHT", 0, 38)
     footerLine:SetHeight(1)
+    -- ── Character filter toggle ──────────────────────────────────
+    local charToggle = CreateFrame("Button", nil, sf, "UIPanelButtonTemplate")
+    charToggle:SetSize(170, 22)
+    charToggle:SetPoint("CENTER", sf, "BOTTOM", -60, 19)
+    local charName = UnitName("player") or "?"
+    local function UpdateCharToggleText()
+        if filterByChar then
+            charToggle:SetText(charName .. " only")
+            if charToggle.GetFontString and charToggle:GetFontString() then
+                charToggle:GetFontString():SetTextColor(0.4, 1, 0.4)
+            end
+        else
+            charToggle:SetText("All characters")
+            if charToggle.GetFontString and charToggle:GetFontString() then
+                charToggle:GetFontString():SetTextColor(0.8, 0.8, 0.8)
+            end
+        end
+    end
+    UpdateCharToggleText()
+    charToggle:SetScript("OnClick", function()
+        filterByChar = filterByChar and nil or charName
+        sf:Hide(); statsFrame = nil
+        ShowStatsWindow(filterByChar)
+    end)
+
     local clearBtn = CreateFrame("Button", nil, sf, "UIPanelButtonTemplate")
-    clearBtn:SetSize(100, 22)
-    clearBtn:SetPoint("CENTER", sf, "BOTTOM", 0, 19)
+    clearBtn:SetSize(80, 22)
+    clearBtn:SetPoint("CENTER", sf, "BOTTOM", 90, 19)
     clearBtn:SetText(L["STATS_CLEAR"])
     if clearBtn.GetFontString and clearBtn:GetFontString() then
         clearBtn:GetFontString():SetTextColor(1, 0.4, 0.4)
@@ -3230,7 +3350,7 @@ ShowStatsWindow = function()
     local renderedSomething = false
 
     -- ── Section Totaux ───────────────────────────────────────────
-    local totals, runCount = ComputeTotals()
+    local totals, runCount = ComputeTotals(filterByChar)
     if #totals > 0 then
         renderedSomething = true
         AddLine(
@@ -3276,7 +3396,15 @@ ShowStatsWindow = function()
     end
 
     -- ── Section Historique ───────────────────────────────────────
-    local runs = LOXXSavedVars.loxxRunHistory or {}
+    local allRuns = LOXXSavedVars.loxxRunHistory or {}
+    local runs = {}
+    local runIndexMap = {}  -- maps filtered index → original index for deletion
+    for i, run in ipairs(allRuns) do
+        if not filterByChar or run.character == filterByChar then
+            runs[#runs + 1] = run
+            runIndexMap[#runs] = i
+        end
+    end
     if #runs > 0 then
         renderedSomething = true
         AddSep()
@@ -3284,8 +3412,9 @@ ShowStatsWindow = function()
         for i, run in ipairs(runs) do
             local keyStr = (run.keyLevel or 0) > 0 and (" [+" .. run.keyLevel .. "]") or ""
             local durStr = FormatDuration(run.duration)
+            local charStr = (not filterByChar and run.character) and ("|cFF6699FF" .. run.character .. "|r  ") or ""
             AddLine(
-                "|cFFFFCC00" .. (run.dungeon or "?") .. keyStr .. "|r  |cFF888888" .. (run.date or "") .. durStr .. "|r",
+                charStr .. "|cFFFFCC00" .. (run.dungeon or "?") .. keyStr .. "|r  |cFF888888" .. (run.date or "") .. durStr .. "|r",
                 0)
             -- Delete (×) button
             local delBtn = CreateFrame("Button", nil, content)
@@ -3293,10 +3422,10 @@ ShowStatsWindow = function()
             delBtn:SetPoint("TOPRIGHT", -4, y + 2)
             delBtn:SetNormalTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Up")
             delBtn:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight")
-            local runIdx = i
+            local origIdx = runIndexMap[i]
             delBtn:SetScript("OnClick", function()
-                table.remove(LOXXSavedVars.loxxRunHistory, runIdx)
-                sf:Hide(); statsFrame = nil; ShowStatsWindow()
+                table.remove(LOXXSavedVars.loxxRunHistory, origIdx)
+                sf:Hide(); statsFrame = nil; ShowStatsWindow(filterByChar)
             end)
             y = y - 16
             for _, row in ipairs(SortedPlayers(run.players)) do
@@ -3655,6 +3784,14 @@ playerCastFrame:SetScript("OnEvent", function(_, _, unit, castGUID, spellID)
                 else
                     local cd = myCachedCD or myBaseCd or data.cd
                     myKickCdEnd = GetTime() + cd
+                    selfKickTime = GetTime()
+                    local capturedPetKickTime = selfKickTime
+                    C_Timer.After(1.5, function()
+                        if selfKickTime == capturedPetKickTime and selfKickTime > 0 then
+                            selfKickTime = 0
+                            RecordMissedKick(myName)
+                        end
+                    end)
                     -- Broadcast to party addon users (Warlock Felhunter Spell Lock
                     -- fires on unit=="pet", not "player", so SendLOXX must be called here)
                     SendLOXX("CAST:" .. cd)
@@ -3673,8 +3810,7 @@ playerCastFrame:SetScript("OnEvent", function(_, _, unit, castGUID, spellID)
 end)
 
 
--- Track recent party casts for correlation (timestamp per player name)
-local recentPartyCasts = {}
+-- recentPartyCasts declared at top of file (needed by UpdateDisplay miss detection)
 local activeChannels = {} -- unit → expected channel endTime (for CHANNEL_STOP early-end detection)
 
 -- Dedup: track last successful correlation to avoid double-counting when
@@ -3708,6 +3844,12 @@ local function OnMobInterrupted(unit)
         -- Consume the timestamp so duplicate INTERRUPTED events (nameplate + target
         -- firing for the same mob in the same frame) cannot match this player again.
         recentPartyCasts[bestName] = nil
+
+        -- If SELF also cast an interrupt within the same window, consume selfKickTime
+        -- to prevent a false missed-kick detection via the C_Timer callback.
+        if selfKickTime > 0 and (now - selfKickTime) < 0.8 then
+            selfKickTime = 0
+        end
 
         -- Safety-net time-based dedup (catches edge cases where bestName changes)
         if bestName == lastCorrName and (now - lastCorrTime) < 0.2 then
@@ -3773,10 +3915,30 @@ local function OnMobInterrupted(unit)
             end
         end
     else
-        DLog("CORR", "NO MATCH best=" .. tostring(bestName) .. " delta=" .. string.format("%.3f", bestDelta))
-        if spyMode then
-            print("  No matching party cast (best=" ..
-                tostring(bestName) .. " delta=" .. string.format("%.3f", bestDelta) .. ")")
+        -- SELF's casts never enter recentPartyCasts (they go through myKickCdEnd directly).
+        -- Fall back to the dedicated selfKickTime timestamp.
+        local selfDelta = selfKickTime > 0 and (now - selfKickTime) or 999
+        if selfDelta < 0.8 then
+            selfKickTime = 0
+            -- Dedup: same mob may fire on multiple unit frames within the same tick
+            if myName == lastCorrName and (now - lastCorrTime) < 0.2 then
+                DLog("CORR", "dedup skip " .. myName .. " (self)")
+                return
+            end
+            lastCorrName = myName
+            lastCorrTime = now
+            DLog("CORR", myName .. " SELF matched delta=" .. string.format("%.3f", selfDelta) .. "s")
+            if spyMode then
+                print("  |cFF00FF00>>> " ..
+                    myName .. " kicked successfully! (SELF delta=" .. string.format("%.3f", selfDelta) .. "s)|r")
+            end
+            SetDisplayDirty()
+        else
+            DLog("CORR", "NO MATCH best=" .. tostring(bestName) .. " delta=" .. string.format("%.3f", bestDelta))
+            if spyMode then
+                print("  No matching party cast (best=" ..
+                    tostring(bestName) .. " delta=" .. string.format("%.3f", bestDelta) .. ")")
+            end
         end
     end
 end
