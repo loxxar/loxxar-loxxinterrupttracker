@@ -4,90 +4,71 @@
 ]]
 
 LOXX_CHANGELOG = [[
+|cFFFFD100v1.4.1|r
+• Kick attribution is now more accurate, especially when multiple players interrupt at the same time
+• Missed kicks are no longer falsely reported when a mob dies or gets CC'd
+• Performance improved — the tracker runs lighter when you're out of combat
+• Players without the addon are now marked as "(estimated)" in the tooltip
+
+|cFFFFD100v1.3.4|r
+• Each bar now shows a red badge when kicks were missed during the run
+• Run stats archive automatically at the end of a Mythic+ key
+• Right-click the tracker to open Settings
+• New option: sort bars alphabetically
+• /loxx miss — print missed kicks for the current run
+• /loxx export — print a full run summary to chat
+
 |cFFFFD100v1.3.3|r
-• Stats: filter history by current character or view all characters
-• Stats: missed kicks now tracked and displayed per player per run
-• Tooltip: shows player name and class color above the interrupt spell name
+• Stats can now be filtered by character or viewed across all characters
+• Missed kicks tracked and displayed per player per run
+• Tooltip now shows player name with class color
 
 |cFFFFD100v1.3.2|r
-• Self interrupts now correctly attributed in dungeon logs and correlation engine
-• Skull Bash, Wind Shear, and all personal interrupts now tracked when self-cast
-• Extra personal kicks (Kick, Pummel, etc.) also attributed correctly
+• Self-cast interrupts now correctly tracked and attributed
+• All personal kicks (Skull Bash, Wind Shear, Pummel, etc.) properly detected
 
 |cFFFFD100v1.3.1|r
-• Fixed party member interrupt cooldowns not updating after kicks
-• Fixed duplicate kick detection when nameplate and target fire simultaneously
-• Added dungeon log system: /loxx record, /loxx record show, /loxx record clear
-• Added localization for 4 new languages: Korean, Japanese, Chinese Simplified, Chinese Traditional
-• Addon now supports 10 client languages
-• Removed Kick Rotation Manager — feature replaced by core interrupt tracking
+• Fixed cooldown tracking not updating after a kick
+• Fixed duplicate kick detection
+• Dungeon log system added: /loxx record, /loxx record show, /loxx record clear
+• 10 languages now supported (added Korean, Japanese, Chinese Simplified & Traditional)
+• Kick Rotation Manager removed — replaced by core interrupt tracking
 
 |cFFFFD100v1.3.0|r
-• Full localization support: English, Français, Deutsch, Italiano, Español
-• All UI strings — tracker, settings, stats — adapt to the client language
-• Escape key now closes the Settings window
-• Stats and Changelog windows close automatically when Settings closes
+• Full localization: English, Français, Deutsch, Italiano, Español
+• Escape key closes the Settings window
+• Stats and Changelog close automatically when Settings closes
 
 |cFFFFD100v1.2.5.5|r
-• Run Stats redesigned: all-time totals with #1/#2/#3 podium ranking
-• Run duration now tracked and displayed in history
-• Stats window: Clear All button, redesigned header, improved layout
-• Frame position saved account-wide — same position across all characters
-• Settings and Stats windows now share a consistent header style
-• Error logging system: /loxx logs to review recent addon events
-• Shadow Priest now correctly tracked (Silence interrupt)
-• Axe Toss (Felguard, Demo Warlock) now correctly detected and tracked
-• Display engine: smart caching for smoother performance
+• Run Stats redesigned with all-time totals and podium ranking
+• Run duration tracked and displayed
+• Frame position saved account-wide across all characters
+• Shadow Priest and Demo Warlock (Axe Toss) now correctly tracked
 
 |cFFFFD100v1.2.5.4|r
-• Commands button added to the Settings footer (/loxx help)
-• Preset selectors redesigned in native Blizzard dropdown style
-• Stats window now shows a helpful message when no data is recorded yet
+• Commands button added to Settings footer
+• Dropdowns redesigned in native Blizzard style
+• Stats window now shows a message when no data is available yet
 
 |cFFFFD100v1.2.5.3|r
-• New preset dropdowns for fonts, font colors, and bar textures
-• Settings window layout expanded for better readability
+• Preset dropdowns for fonts, colors, and bar textures
 
 |cFFFFD100v1.2.5.2|r
-• Healing spec detection refined for 12.0.1 (Resto Shaman correctly keeps Wind Shear)
-• Settings footer and layout polished
-
-|cFFFFD100v1.2.5.1|r
-• Addon initialization made more reliable across all load conditions
+• Resto Shaman now correctly keeps Wind Shear
 
 |cFFFFD100v1.2.5|r
-• Font preset selector added to Settings
-• Bar texture preset selector added to Settings
-
-|cFFFFD100v1.2.4.9|r
-• Visual consistency pass across all tracker elements
-• Minor stability improvements
-
-|cFFFFD100v1.2.4.8|r
-• UI flow and interaction polish
-
-|cFFFFD100v1.2.4.7|r
-• Settings menu layout and spacing refined
-
-|cFFFFD100v1.2.4.6|r
-• Tracker display tuning and visual refinements
-
-|cFFFFD100v1.2.4.5|r
-• Settings footer layout improved
+• Font and bar texture selectors added to Settings
 
 |cFFFFD100v1.2.4.4|r
-• "Kicks Ready" bar added: optional strip showing global kick availability at a glance
-
-|cFFFFD100v1.2.4.3|r
-• Kick Rotation panel: improved display and management interface
+• "Kicks Ready" bar added — shows global kick availability at a glance
 
 |cFFFFD100v1.2.4|r
-• Frame position saved and restored between sessions
-• Kick Rotation order synced in real time across all addon users in the party
+• Frame position saved between sessions
+• Kick Rotation synced in real time across party addon users
 
 |cFFFFD100v1.2.3|r
-• Alert band redesigned with color-coded urgency states (ready / incoming / no kick)
+• Alert band redesigned with color-coded states (ready / incoming / no kick)
 
 |cFFFFD100v1.2.2|r
-• Full WoW Midnight 12.0 compatibility — taint-safe rewrite from the ground up
+• Full WoW Midnight 12.0 compatibility
 ]]

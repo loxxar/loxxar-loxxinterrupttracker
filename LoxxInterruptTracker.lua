@@ -12,9 +12,41 @@
     Main chunk: ONLY plain CreateFrame("Frame") + RegisterEvent.
 ]]
 
+--[[
+    API CONFORMANCE — WoW Midnight 12.0+
+    ======================================
+    The following APIs are deliberately NOT used and the reasons are documented here
+    to prevent accidental reintroduction in future development:
+
+    COMBAT_LOG_EVENT_UNFILTERED
+        Restricted in 12.0: Frame:RegisterEvent() is blocked for this event.
+        Detection of party member interrupts falls back to the
+        UNIT_SPELLCAST_SUCCEEDED timestamp-correlation engine.
+
+    SPELL_UPDATE_COOLDOWN
+        Restricted in 12.0. Cooldown tracking for the local player relies on
+        GetSpellBaseCooldown + observed cast timestamps (myCachedCD). Removed
+        from event registration; do not re-add.
+
+    GetSpellCooldown on non-player units
+        Returns secret/opaque values for group members in 12.0. Only called for
+        "player" and "pet". Party CDs are derived from JOIN messages (addon comms)
+        or timestamp correlation, never from direct API queries on other units.
+
+    C_SpellBook / C_Spell secret spellIDs
+        In 12.0, spellIDs returned by talent/spellbook APIs for party members are
+        opaque and cannot be used as numeric table keys. All talent tables have a
+        _STR counterpart (string-keyed) as a safe fallback.
+
+    Offscreen status bar technique
+        Not used. This technique (placing a hidden StatusBar widget to read
+        arbitrary unit spell data) exploits an API grey area and risks addon
+        policy violations. Do not implement.
+]]
+
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.3.3"
+local LOXX_VERSION = "1.4.1"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -120,6 +152,7 @@ local DEFAULTS = {
     fontPreset        = 1,
     fontColorPreset   = 1,
     barTexturePreset  = 1,
+    sortAlpha         = false,
 }
 
 ------------------------------------------------------------
@@ -190,8 +223,10 @@ local MAX_BARS             = 40    -- absolute cap (supports up to 40-man raids)
 local currentMaxBars       = 7     -- updated dynamically based on group size
 local mainFrame, titleText, configFrame
 local updateTicker
+local RestartTicker        -- forward declaration; defined inside Initialize
 local ready                = false
 local lastAnnounce         = 0
+local lastStateAnnounce    = 0  -- tracks last STATE broadcast for 5s throttle
 local testMode             = false
 local testTicker           = nil
 local inCombat             = false
@@ -205,7 +240,7 @@ local statsFrame           = nil -- stats window
 local loxxErrorLog         = {}
 local loxxDungeonLog       = {}
 local loxxDungeonLogActive = false
-local DUNGEON_LOG_MAX      = 10000
+local DUNGEON_LOG_MAX      = 25000
 local dungeonLogFrame      = nil
 local loxxLastErr          = ""
 local loxxErrCount         = 0
@@ -568,12 +603,22 @@ local function SendLOXX(msg)
     -- PARTY works outside instances; INSTANCE_CHAT works inside M+/raids.
     local inInstance = IsInInstance()
     local channel = inInstance and "INSTANCE_CHAT" or "PARTY"
-    pcall(C_ChatInfo.SendAddonMessage, MSG_PREFIX, msg, channel)
+    local ok, err = pcall(C_ChatInfo.SendAddonMessage, MSG_PREFIX, msg, channel)
+    if not ok then
+        local errStr = tostring(err)
+        DLog("COMM", "SendLOXX FAILED ch=" .. channel .. " msg=" .. tostring(msg) .. " err=" .. errStr)
+        LoxxLogError("SendLOXX failed: " .. errStr)
+    end
 end
 
 local function ReadMyBaseCd()
     if not mySpellID then return end
     local ok, ms = pcall(GetSpellBaseCooldown, mySpellID)
+    if not ok then
+        DLog("SELF", "ReadMyBaseCd pcall error: " .. tostring(ms))
+        LoxxLogError("ReadMyBaseCd failed spellID=" .. tostring(mySpellID) .. ": " .. tostring(ms))
+        return
+    end
     if ok and ms then
         local clean = tonumber(string.format("%.0f", ms))
         if clean and clean > 0 then
@@ -583,6 +628,8 @@ local function ReadMyBaseCd()
             -- No real interrupt has a base CD < 5s (shortest is Wind Shear at 12s).
             if cd >= 5 then
                 myBaseCd = cd
+            else
+                DLog("SELF", "ReadMyBaseCd GCD-corrupted value=" .. tostring(cd) .. "s ignored")
             end
         end
     end
@@ -595,11 +642,32 @@ end
 local function AnnounceJoin()
     if not myClass or not mySpellID then return end
     local now = GetTime()
-    if now - lastAnnounce < 3 then return end
+    if now - lastAnnounce < 30 then return end
     lastAnnounce = now
     ReadMyBaseCd()
     local cd = myBaseCd or ALL_INTERRUPTS[mySpellID].cd
-    SendLOXX("JOIN:" .. myClass .. ":" .. mySpellID .. ":" .. cd)
+    -- Append addon version so peers can identify protocol capabilities.
+    -- Field is optional and ignored by older versions (backward-compatible).
+    local joinMsg = "JOIN:" .. myClass .. ":" .. mySpellID .. ":" .. cd .. ":" .. LOXX_VERSION
+    SendLOXX(joinMsg)
+    DLog("JOIN", "SENT cls=" .. tostring(myClass) .. " spellID=" .. tostring(mySpellID) .. " cd=" .. cd .. " ver=" .. LOXX_VERSION)
+end
+
+-- Broadcasts current cdEnd to the party so latecomers can resync.
+-- Called every 5s from the periodic ticker when in a group and on CD.
+local function AnnounceState()
+    if not IsInGroup() then return end
+    local now = GetTime()
+    if now - lastStateAnnounce < 4.5 then return end -- avoid double-fires on fast ticks
+    lastStateAnnounce = now
+    local cdEnd = myKickCdEnd or 0
+    local remaining = cdEnd - now
+    -- Only broadcast while actually on cooldown (remaining > 0).
+    -- Sends remaining seconds rounded to 1 decimal to keep payload compact.
+    if remaining > 0 then
+        DLog("SYNC", "STATE SENT rem=" .. string.format("%.1f", remaining) .. "s")
+        SendLOXX("STATE:" .. string.format("%.1f", remaining))
+    end
 end
 
 local function OnAddonMessage(prefix, message, channel, sender)
@@ -624,26 +692,103 @@ local function OnAddonMessage(prefix, message, channel, sender)
         local cls = parts[2]
         local spellID = tonumber(parts[3])
         local baseCd = tonumber(parts[4])
+        local peerVersion = parts[5] -- optional, absent in older versions
         if cls and CLASS_COLORS[cls] and spellID and ALL_INTERRUPTS[spellID] then
+            local isNew = (partyAddonUsers[shortName] == nil)
             partyAddonUsers[shortName] = partyAddonUsers[shortName] or {}
             partyAddonUsers[shortName].class = cls
             partyAddonUsers[shortName].spellID = spellID
             partyAddonUsers[shortName].cdEnd = partyAddonUsers[shortName].cdEnd or 0
+            partyAddonUsers[shortName].addonVersion = peerVersion -- nil for old clients
             -- Guard against GCD-corrupted baseCd (< 5s) — same root cause as ReadMyBaseCd.
             -- No real interrupt has a base CD under 5s (Wind Shear = 12s is the shortest).
             if baseCd and baseCd >= 5 then
                 partyAddonUsers[shortName].baseCd = baseCd
             end
+            DLog("JOIN", shortName .. (isNew and " NEW" or " UPDATE")
+                .. " cls=" .. tostring(cls)
+                .. " spellID=" .. tostring(spellID)
+                .. " baseCd=" .. tostring(baseCd)
+                .. " ver=" .. tostring(peerVersion or "old"))
             SetDisplayDirty()
             AnnounceJoin()
+        else
+            DLog("JOIN", "REJECTED from " .. shortName
+                .. " cls=" .. tostring(parts[2])
+                .. " spellID=" .. tostring(parts[3])
+                .. " (unknown class or spell)")
         end
+
     elseif command == "CAST" then
         local cd = tonumber(parts[2])
         if cd and cd > 0 and partyAddonUsers[shortName] then
-            partyAddonUsers[shortName].cdEnd = GetTime() + cd
+            -- Retry duplicates are expected (x3 send policy); guard against updating
+            -- cdEnd backward when a later retry arrives after the next real CAST.
+            local newEnd = GetTime() + cd
+            local prevEnd = partyAddonUsers[shortName].cdEnd or 0
+            if newEnd > prevEnd then
+                partyAddonUsers[shortName].cdEnd = newEnd
+                DLog("CAST", shortName .. " cd=" .. cd .. "s applied")
+            else
+                DLog("CAST", shortName .. " cd=" .. cd .. "s DEDUP (retry, ignored)")
+            end
             -- Do NOT overwrite baseCd here: baseCd is set by JOIN from spell tables
             -- and must stay stable. CAST only updates cdEnd.
             RecordKick(shortName)
+        elseif cd and cd > 0 then
+            DLog("CAST", "CAST from " .. shortName .. " ignored — not in partyAddonUsers")
+        else
+            DLog("CAST", "CAST from " .. shortName .. " malformed (cd=" .. tostring(parts[2]) .. ")")
+        end
+
+    elseif command == "STATE" then
+        -- Periodic resync: peer sends remaining seconds on their CD.
+        -- Used to correct drift for players who join mid-dungeon.
+        local remaining = tonumber(parts[2])
+        if remaining and remaining > 0 and partyAddonUsers[shortName] then
+            local now        = GetTime()
+            local newEnd     = now + remaining
+            local ourEnd     = partyAddonUsers[shortName].cdEnd or 0
+            local ourRem     = (ourEnd > now) and (ourEnd - now) or 0
+            -- Moderate-drift detection: if our local view of this player's CD
+            -- diverges from what they report by more than 2s, we are desynced.
+            -- Ask all peers (including this one) to resend their full state.
+            -- Throttled: at most one REQ_STATE per 10s to avoid spam.
+            local driftAbs = math.abs(ourRem - remaining)
+            if driftAbs > 2.0 then
+                local lastReq = partyAddonUsers[shortName].lastReqState or 0
+                if (now - lastReq) >= 10 then
+                    partyAddonUsers[shortName].lastReqState = now
+                    SendLOXX("REQ_STATE")
+                    DLog("SYNC", shortName .. " drift=" .. string.format("%.1f", driftAbs)
+                        .. "s (us=" .. string.format("%.1f", ourRem)
+                        .. "s peer=" .. string.format("%.1f", remaining)
+                        .. "s) → REQ_STATE sent")
+                end
+            end
+            -- Apply the peer's value only if it is strictly later than our record
+            -- (guards against reverting a fresh CAST with a stale STATE broadcast).
+            if newEnd > ourEnd then
+                partyAddonUsers[shortName].cdEnd = newEnd
+                DLog("SYNC", shortName .. " STATE applied rem=" .. string.format("%.1f", remaining) .. "s")
+                SetDisplayDirty()
+            else
+                DLog("SYNC", shortName .. " STATE ignored (stale, rem=" .. string.format("%.1f", remaining) .. "s)")
+            end
+        elseif remaining and remaining > 0 then
+            DLog("SYNC", "STATE from " .. shortName .. " ignored — not in partyAddonUsers")
+        end
+
+    elseif command == "REQ_STATE" then
+        -- A peer detected a desync and is asking for our current state.
+        -- Reply immediately with a STATE if we are on CD.
+        local now = GetTime()
+        local remaining = (myKickCdEnd or 0) - now
+        if remaining > 0 then
+            DLog("SYNC", "REQ_STATE from " .. shortName .. " → replied STATE rem=" .. string.format("%.1f", remaining) .. "s")
+            SendLOXX("STATE:" .. string.format("%.1f", remaining))
+        else
+            DLog("SYNC", "REQ_STATE from " .. shortName .. " → no reply (not on CD)")
         end
     end
 end
@@ -750,13 +895,19 @@ local function OnSpellCastSucceeded(unit, castGUID, spellID, isParty, cleanName)
     if myExtraKicks[spellID] then
         myExtraKicks[spellID].cdEnd = GetTime() + myExtraKicks[spellID].baseCd
         selfKickTime = GetTime()
-        local capturedTime = selfKickTime
-        C_Timer.After(1.5, function()
-            if selfKickTime == capturedTime and selfKickTime > 0 then
-                selfKickTime = 0
-                RecordMissedKick(myName)
-            end
-        end)
+        local token = NewMissToken()
+        local mobGUID = UnitGUID("target") or ""
+        pendingMissedKick[token] = {
+            unit    = "target",
+            mobGUID = mobGUID,
+            timer   = C_Timer.NewTimer(1.5, function()
+                pendingMissedKick[token] = nil
+                if selfKickTime > 0 then
+                    selfKickTime = 0
+                    RecordMissedKick(myName)
+                end
+            end),
+        }
         if spyMode then
             print("|cFF00DDDD[SPY]|r Own extra kick: " ..
                 (myExtraKicks[spellID].name or "?") .. " CD=" .. myExtraKicks[spellID].baseCd)
@@ -769,13 +920,19 @@ local function OnSpellCastSucceeded(unit, castGUID, spellID, isParty, cleanName)
         local data = ALL_INTERRUPTS[spellID]
         myExtraKicks[spellID] = { baseCd = data.cd, cdEnd = GetTime() + data.cd }
         selfKickTime = GetTime()
-        local capturedTime = selfKickTime
-        C_Timer.After(1.5, function()
-            if selfKickTime == capturedTime and selfKickTime > 0 then
-                selfKickTime = 0
-                RecordMissedKick(myName)
-            end
-        end)
+        local token = NewMissToken()
+        local mobGUID = UnitGUID("target") or ""
+        pendingMissedKick[token] = {
+            unit    = "target",
+            mobGUID = mobGUID,
+            timer   = C_Timer.NewTimer(1.5, function()
+                pendingMissedKick[token] = nil
+                if selfKickTime > 0 then
+                    selfKickTime = 0
+                    RecordMissedKick(myName)
+                end
+            end),
+        }
         if spyMode then
             print("|cFF00DDDD[SPY]|r Auto-added extra kick: " .. data.name .. " CD=" .. data.cd)
         end
@@ -785,14 +942,26 @@ local function OnSpellCastSucceeded(unit, castGUID, spellID, isParty, cleanName)
     local cd = myCachedCD or myBaseCd or ALL_INTERRUPTS[spellID].cd
     myKickCdEnd = GetTime() + cd
     selfKickTime = GetTime()
-    local capturedSelfKickTime = selfKickTime
-    C_Timer.After(1.5, function()
-        if selfKickTime == capturedSelfKickTime and selfKickTime > 0 then
-            selfKickTime = 0
-            RecordMissedKick(myName)
-        end
-    end)
-    SendLOXX("CAST:" .. cd)
+    local token = NewMissToken()
+    local mobGUID = UnitGUID("target") or ""
+    pendingMissedKick[token] = {
+        unit    = "target",
+        mobGUID = mobGUID,
+        timer   = C_Timer.NewTimer(1.5, function()
+            pendingMissedKick[token] = nil
+            if selfKickTime > 0 then
+                selfKickTime = 0
+                RecordMissedKick(myName)
+            end
+        end),
+    }
+    -- Send CAST immediately, then retry at +50ms and +100ms.
+    -- CAST is the only critical message (missed delivery = wrong CD on peer displays).
+    -- Three sends covers typical packet loss without meaningfully increasing bandwidth.
+    local castMsg = "CAST:" .. cd
+    SendLOXX(castMsg)
+    C_Timer.After(0.05, function() SendLOXX(castMsg) end)
+    C_Timer.After(0.10, function() SendLOXX(castMsg) end)
     RecordKick(myName)
 end
 
@@ -1096,15 +1265,19 @@ local function ScanInspectTalents(unit)
                         end
                         local talent = (pcall(function() return CD_REDUCTION_TALENTS[defSpellID] end) and CD_REDUCTION_TALENTS[defSpellID])
                             or (defSpellStr and CD_REDUCTION_TALENTS_STR[defSpellStr])
-                        if talent then
+                        if talent and talent.affects == info.spellID then
+                            -- Reset to canonical CD before applying reduction to prevent
+                            -- compounding across multiple re-scans (30s ticker).
+                            local spellData = ALL_INTERRUPTS[info.spellID]
+                            local canonicalCd = (spellData and spellData.cd) or info.baseCd
                             local newCd
                             if talent.pctReduction then
                                 -- Percentage reduction (e.g., Interwoven Threads: -10%)
-                                newCd = info.baseCd * (1 - talent.pctReduction / 100)
+                                newCd = canonicalCd * (1 - talent.pctReduction / 100)
                                 newCd = math.floor(newCd + 0.5) -- round
                             else
                                 -- Flat reduction
-                                newCd = info.baseCd - talent.reduction
+                                newCd = canonicalCd - talent.reduction
                             end
                             if newCd < 1 then newCd = 1 end
                             info.baseCd = newCd
@@ -1369,6 +1542,14 @@ local function RebuildBars()
         f.cdFontSz        = cdFontSize
         f.readyFontSz     = readyFontSzBuild
 
+        -- Missed kick badge (red "✗N" bottom-left of bar)
+        local badge = content:CreateFontString(nil, "OVERLAY")
+        badge:SetFont(FONT_FACE, 8, "OUTLINE")
+        badge:SetTextColor(1, 0.2, 0.2, 1)
+        badge:SetPoint("BOTTOMLEFT", 2, 1)
+        badge:Hide()
+        f.missedBadge = badge
+
         f:EnableMouse(true)
         f:SetScript("OnEnter", function(self)
             if not db.showTooltip then return end
@@ -1384,6 +1565,10 @@ local function RebuildBars()
                 GameTooltip:AddLine(string.format(L["TOOLTIP_CD"], self.ttRem, self.ttBaseCd or 0), 0.7, 0.7, 0.7)
             else
                 GameTooltip:AddLine(L["TOOLTIP_READY"], 0.2, 1.0, 0.2)
+            end
+            -- Indicate when CD tracking is estimated (no LOXX addon on this player).
+            if self.ttIsEstimated then
+                GameTooltip:AddLine(L["TOOLTIP_ESTIMATED"] or "(estimated — no addon)", 0.6, 0.6, 0.6)
             end
             GameTooltip:Show()
         end)
@@ -1546,8 +1731,13 @@ local function UpdateDisplay()
     local now = GetTime()
     local barIdx = 1
 
+    -- Prune stale recentPartyCasts entries (> 2s old)
+    for name, ts in pairs(recentPartyCasts) do
+        if (now - ts) > 2 then recentPartyCasts[name] = nil end
+    end
+
     -- ── Helper: render a party-side bar (partyCdText path) ───────
-    local function RenderPartyBar(bar, icon, name, col, baseCd, rem, spellName)
+    local function RenderPartyBar(bar, icon, name, col, baseCd, rem, spellName, isEstimated)
         bar:Show()
         bar.icon:SetTexture(icon)
         bar.playerCdText:Hide()
@@ -1561,6 +1751,17 @@ local function UpdateDisplay()
         bar.ttBaseCd      = baseCd
         bar.ttPlayerName  = name
         bar.ttClassColor  = col
+        bar.ttIsEstimated = isEstimated
+        -- Missed kick badge
+        if bar.missedBadge then
+            local misses = loxxCurrentRun and loxxCurrentRun.missedKicks and loxxCurrentRun.missedKicks[name]
+            if misses and misses > 0 then
+                bar.missedBadge:SetText("x" .. misses)
+                bar.missedBadge:Show()
+            else
+                bar.missedBadge:Hide()
+            end
+        end
         if rem > 0.5 then
             bar.cdBar:SetValue(rem)
             bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
@@ -1593,6 +1794,16 @@ local function UpdateDisplay()
         bar.ttBaseCd     = myBaseCd or mySpellData.cd
         bar.ttPlayerName = myName or "?"
         bar.ttClassColor = col
+        -- Missed kick badge (SELF)
+        if bar.missedBadge then
+            local misses = loxxCurrentRun and loxxCurrentRun.missedKicks and myName and loxxCurrentRun.missedKicks[myName]
+            if misses and misses > 0 then
+                bar.missedBadge:SetText("x" .. misses)
+                bar.missedBadge:Show()
+            else
+                bar.missedBadge:Hide()
+            end
+        end
 
         if myKickCdEnd > now then
             local cdRemaining = myKickCdEnd - now
@@ -1684,13 +1895,16 @@ local function UpdateDisplay()
                 local rem = (info.cdEnd > now) and (info.cdEnd - now) or 0
                 local baseCd = info.baseCd or data.cd
                 table.insert(cachedPartyEntries, {
-                    kind = "party",
-                    name = name,
-                    info = info,
-                    data = data,
-                    rem = rem,
-                    baseCd = baseCd,
-                    isReady = (rem <= 0.5),
+                    kind        = "party",
+                    name        = name,
+                    info        = info,
+                    data        = data,
+                    rem         = rem,
+                    baseCd      = baseCd,
+                    isReady     = (rem <= 0.5),
+                    -- isEstimated: true when this player was auto-registered by class
+                    -- (no LOXX addon message received) — CD tracking is approximate.
+                    isEstimated = (info.addonVersion == nil),
                 })
             elseif spyMode and info.spellID then
                 print("|cFFFF4400[LOXX]|r Unknown spellID=" .. tostring(info.spellID) .. " for " .. name)
@@ -1728,6 +1942,17 @@ local function UpdateDisplay()
             if e.kind == "party" then
                 e.rem     = (e.info.cdEnd > now) and (e.info.cdEnd - now) or 0
                 e.isReady = (e.rem <= 0.5)
+                -- Hard-limit guard: rem > baseCd+60 is physically impossible and
+                -- indicates a corrupted cdEnd (clock overflow, missed CAST, etc.).
+                -- Ask for a resync but do NOT reset locally — wait for the STATE reply
+                -- to avoid a flash on the display.
+                if e.rem > 0 and e.baseCd and e.rem > (e.baseCd + 60) then
+                    local lastReq = e.info.lastReqState or 0
+                    if (now - lastReq) >= 10 then
+                        e.info.lastReqState = now
+                        SendLOXX("REQ_STATE")
+                    end
+                end
             else
                 e.ekRem   = (e.ek.cdEnd > now) and (e.ek.cdEnd - now) or 0
                 e.isReady = (e.ekRem <= 0.5)
@@ -1736,6 +1961,7 @@ local function UpdateDisplay()
     end
 
     table.sort(cachedPartyEntries, function(a, b)
+        if db.sortAlpha then return (a.name or "") < (b.name or "") end
         if a.isReady ~= b.isReady then return a.isReady end
         if a.isReady then
             local aB, bB = (a.baseCd or 0), (b.baseCd or 0)
@@ -1757,7 +1983,7 @@ local function UpdateDisplay()
         local bar = bars[barIdx]
         if e.kind == "party" then
             local col = CLASS_COLORS[e.info.class] or { 1, 1, 1 }
-            RenderPartyBar(bar, e.data.icon, e.name, col, e.baseCd, e.rem, e.data.name)
+            RenderPartyBar(bar, e.data.icon, e.name, col, e.baseCd, e.rem, e.data.name, e.isEstimated)
             if e.rem <= 0.5 then
                 if e.info.wasOnCd and db.soundOnReady then
                     PlaySound(db.soundID or 8960, "Master")
@@ -2733,6 +2959,9 @@ local function CreateUI()
         self:StopMovingOrSizing()
         LoxxSaveFramePosition(self)
     end)
+    mainFrame:SetScript("OnMouseDown", function(self, btn)
+        if btn == "RightButton" then CreateConfigPanel() end
+    end)
     mainFrame:SetAlpha(db.alpha)
 
     -- Background
@@ -3011,7 +3240,7 @@ local function SetupSlash()
             else
                 local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
                 dungeonLogFrame = f
-                f:SetSize(700, 500)
+                f:SetSize(740, 560)
                 f:SetPoint("CENTER")
                 f:SetFrameStrata("DIALOG")
                 f:SetBackdrop({
@@ -3027,6 +3256,7 @@ local function SetupSlash()
                 f:RegisterForDrag("LeftButton")
                 f:SetScript("OnDragStart", f.StartMoving)
                 f:SetScript("OnDragStop", f.StopMovingOrSizing)
+
                 -- Header
                 local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
                 title:SetPoint("TOP", f, "TOP", 0, -16)
@@ -3034,24 +3264,23 @@ local function SetupSlash()
                 local total = #loxxDungeonLog
                 title:SetText("|cFF00DDDDLoxx Dungeon Log|r — " ..
                     total .. " entries" .. (loxxDungeonLogActive and " |cFF00FF00[LIVE]|r" or ""))
+
                 -- Hint
                 local hint = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
                 hint:SetPoint("TOP", title, "BOTTOM", 0, -4)
-                local hintText = "Click inside the text area, then Ctrl+A / Ctrl+C to copy all"
-                if total > DISPLAY_MAX then
-                    hintText = "Showing last " .. DISPLAY_MAX .. " of " .. total .. " — " .. hintText
-                end
-                hint:SetText(hintText)
+                hint:SetText("Click text area → Ctrl+A / Ctrl+C to copy  |  Filter buttons below")
                 hint:SetTextColor(0.7, 0.7, 0.7)
+
                 -- Close button
                 local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
                 closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -5, -5)
                 closeBtn:SetScript("OnClick", function()
                     f:Hide(); dungeonLogFrame = nil
                 end)
-                -- ScrollFrame + EditBox
+
+                -- ScrollFrame + EditBox (reserve top space for filter buttons)
                 local sf = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
-                sf:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -60)
+                sf:SetPoint("TOPLEFT",  f, "TOPLEFT",  16, -100)
                 sf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -32, 16)
                 local eb = CreateFrame("EditBox", nil, sf)
                 eb:SetSize(sf:GetWidth(), 1)
@@ -3063,12 +3292,64 @@ local function SetupSlash()
                     f:Hide(); dungeonLogFrame = nil
                 end)
                 sf:SetScrollChild(eb)
-                -- Fill text: display only the last DISPLAY_MAX entries to avoid UI freeze
-                local startIdx = math.max(1, total - DISPLAY_MAX + 1)
-                local slice = {}
-                for i = startIdx, total do slice[#slice + 1] = loxxDungeonLog[i] end
-                eb:SetText(table.concat(slice, "\n"))
-                eb:SetWidth(sf:GetWidth())
+
+                -- Helper: rebuild the text area for a given filter (nil = ALL)
+                local activeFilter = nil
+                local function RebuildLogText(filter)
+                    activeFilter = filter
+                    local source = loxxDungeonLog
+                    local filtered = {}
+                    if filter and filter ~= "ALL" then
+                        local tag = "[" .. filter .. "]"
+                        for _, line in ipairs(source) do
+                            if line:find(tag, 1, true) then
+                                filtered[#filtered + 1] = line
+                            end
+                        end
+                    else
+                        for i = 1, #source do filtered[i] = source[i] end
+                    end
+                    local count = #filtered
+                    local startIdx = math.max(1, count - DISPLAY_MAX + 1)
+                    local slice = {}
+                    for i = startIdx, count do slice[#slice + 1] = filtered[i] end
+                    eb:SetText(table.concat(slice, "\n"))
+                    eb:SetWidth(sf:GetWidth())
+                    local label = filter or "ALL"
+                    local shown = math.min(count, DISPLAY_MAX)
+                    title:SetText("|cFF00DDDDLoxx Dungeon Log|r [" .. label .. "] — "
+                        .. shown .. "/" .. count .. " of " .. total
+                        .. (loxxDungeonLogActive and " |cFF00FF00[LIVE]|r" or ""))
+                end
+
+                -- Filter buttons row
+                -- Categories: ALL + every cat used by DLog
+                local FILTER_CATS = {
+                    "ALL", "KICK", "CORR", "MISS", "SYNC",
+                    "JOIN", "CAST", "REG", "SPEC", "INSPECT",
+                    "GROUP", "ROLE", "PET", "WORLD", "CM",
+                    "PARTY", "START", "SUCC", "MOB", "CC", "CHAN",
+                    "SELF", "COMM",
+                }
+                local btnW, btnH, btnPad = 54, 20, 4
+                local perRow = 12
+                local bx, by = 16, -58
+                for i, cat in ipairs(FILTER_CATS) do
+                    local col = ((i - 1) % perRow)
+                    local row = math.floor((i - 1) / perRow)
+                    local btn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+                    btn:SetSize(btnW, btnH)
+                    btn:SetPoint("TOPLEFT", f, "TOPLEFT",
+                        bx + col * (btnW + btnPad),
+                        by - row * (btnH + btnPad))
+                    btn:SetText(cat)
+                    btn:SetScript("OnClick", function()
+                        RebuildLogText(cat == "ALL" and nil or cat)
+                    end)
+                end
+
+                -- Initial render: all entries
+                RebuildLogText(nil)
                 f:Show()
             end
         elseif cmd == "record clear" then
@@ -3094,6 +3375,35 @@ local function SetupSlash()
             loxxErrorLog = {}
             if LOXXSavedVars then LOXXSavedVars.loxxErrorLog = {} end
             print("|cFF00DDDD[LOXX]|r " .. L["CMD_LOG_CLEAR"])
+        elseif cmd == "miss" then
+            if not loxxCurrentRun then
+                print("|cFF00DDDD[LOXX]|r No active run.")
+            elseif not loxxCurrentRun.missedKicks or not next(loxxCurrentRun.missedKicks) then
+                print("|cFF00DDDD[LOXX]|r No missed kicks this run.")
+            else
+                print("|cFF00DDDD[LOXX]|r Missed kicks — " .. (loxxCurrentRun.dungeon or "?") .. ":")
+                for name, count in pairs(loxxCurrentRun.missedKicks) do
+                    print("  |cFFFF4444" .. name .. "|r: " .. count)
+                end
+            end
+        elseif cmd == "export" then
+            if not loxxCurrentRun then
+                print("|cFF00DDDD[LOXX]|r No active run.")
+            else
+                local r = loxxCurrentRun
+                local lvl = (r.keyLevel and r.keyLevel > 0) and (" +" .. r.keyLevel) or ""
+                print("|cFFFFD100[Loxx Export]|r " .. (r.dungeon or "?") .. lvl .. " — " .. (r.date or "?"))
+                print("  Character: " .. (r.character or "?"))
+                local names = {}
+                for name in pairs(r.players or {}) do names[#names + 1] = name end
+                table.sort(names)
+                for _, name in ipairs(names) do
+                    local kicks  = r.players[name] or 0
+                    local misses = (r.missedKicks and r.missedKicks[name]) or 0
+                    local mStr   = misses > 0 and " |cFFFF4444(" .. misses .. " missed)|r" or ""
+                    print("  " .. name .. ": " .. kicks .. " kick" .. (kicks ~= 1 and "s" or "") .. mStr)
+                end
+            end
         elseif cmd == "help" then
             print(
                 "|cFF00DDDD[LOXX]|r /loxx")
@@ -3533,7 +3843,8 @@ local function RegisterBlizzardOptions()
     BC("Show READY Text", "showReady", LX, yL); yL = yL - 24
     BC("Show 'X kicks ready' bar", "showKicksReadyBar", LX, yL); yL = yL - 24
     BC("Tooltip on Hover", "showTooltip", LX, yL); yL = yL - 24
-    BC("Hide out of combat", "hideOutOfCombat", LX, yL); yL = yL - 36
+    BC("Hide out of combat", "hideOutOfCombat", LX, yL); yL = yL - 24
+    BC("Sort bars alphabetically", "sortAlpha", LX, yL); yL = yL - 36
 
     BH("FONT SIZES", LX, yL); yL = yL - 22
     BS("LOXX_Blizz_NameFont", panel, LSL, yL, 2, 32, 1,
@@ -3673,18 +3984,44 @@ local function Initialize()
 
     ready = true
 
-    if updateTicker then updateTicker:Cancel() end
+    -- Adaptive ticker: 0.1s during combat (or when CDs are active),
+    -- 0.5s out of combat when all bars are ready (reduces CPU cost significantly).
+    local TICK_COMBAT = 0.1
+    local TICK_OOC    = 0.5
     local lastTickErr = ""
-    updateTicker = C_Timer.NewTicker(0.1, function()
-        local ok, err = pcall(UpdateDisplay)
-        if not ok then
-            local e = tostring(err)
-            if e ~= lastTickErr then
-                lastTickErr = e
-                LoxxLogError("Ticker: " .. e)
+
+    local function StartTicker(interval)
+        if updateTicker then updateTicker:Cancel() end
+        updateTicker = C_Timer.NewTicker(interval, function()
+            local ok, err = pcall(UpdateDisplay)
+            if not ok then
+                local e = tostring(err)
+                if e ~= lastTickErr then
+                    lastTickErr = e
+                    LoxxLogError("Ticker: " .. e)
+                end
             end
+        end)
+    end
+
+    -- Determine whether any party member has an active CD (cdEnd in the future).
+    local function AnyCDActive()
+        local now = GetTime()
+        if myKickCdEnd > now then return true end
+        for _, info in pairs(partyAddonUsers) do
+            if info.cdEnd and info.cdEnd > now then return true end
         end
-    end)
+        return false
+    end
+
+    -- RestartTicker is called on combat state changes and from UpdateDisplay
+    -- (via a flag) when the last active CD expires.
+    RestartTicker = function()
+        local interval = (inCombat or AnyCDActive()) and TICK_COMBAT or TICK_OOC
+        StartTicker(interval)
+    end
+
+    RestartTicker()
 
     -- Periodic re-inspect to detect talent changes on party members (every 30s)
     C_Timer.NewTicker(30, function()
@@ -3694,7 +4031,28 @@ local function Initialize()
             inspectedPlayers[name] = nil
         end
         QueuePartyInspect()
+
+        -- Purge stale activeChannels entries (mob changed target or despawned
+        -- without firing CHANNEL_STOP — would leak indefinitely otherwise).
+        local now = GetTime()
+        for unit, endTime in pairs(activeChannels) do
+            if (now - endTime) > 30 then
+                activeChannels[unit] = nil
+                DLog("CHAN", "purged stale activeChannels[" .. unit .. "]")
+            end
+        end
+
+        -- Purge orphaned pendingMissedKick entries (timer already fired or leaked).
+        for token, entry in pairs(pendingMissedKick) do
+            if not entry.timer then
+                pendingMissedKick[token] = nil
+            end
+        end
     end)
+
+    -- Broadcast our cooldown state every 5s so latecomers can resync.
+    -- AnnounceState is self-throttled and no-ops when not on CD or not in a group.
+    C_Timer.NewTicker(5, AnnounceState)
 
     C_Timer.After(2, AnnounceJoin)
     print("|cFF00DDDD[Loxx Interrupt Tracker]|r v" .. LOXX_VERSION .. " | /loxx")
@@ -3715,6 +4073,8 @@ ef:RegisterEvent("PLAYER_REGEN_ENABLED")
 ef:RegisterEvent("PLAYER_REGEN_DISABLED")
 ef:RegisterEvent("INSPECT_READY")
 ef:RegisterEvent("CHALLENGE_MODE_START")
+ef:RegisterEvent("CHALLENGE_MODE_COMPLETED")
+ef:RegisterEvent("CHALLENGE_MODE_RESET")
 ef:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 ef:RegisterEvent("UNIT_PET")
 ef:RegisterEvent("ROLE_CHANGED_INFORM")
@@ -3785,16 +4145,24 @@ playerCastFrame:SetScript("OnEvent", function(_, _, unit, castGUID, spellID)
                     local cd = myCachedCD or myBaseCd or data.cd
                     myKickCdEnd = GetTime() + cd
                     selfKickTime = GetTime()
-                    local capturedPetKickTime = selfKickTime
-                    C_Timer.After(1.5, function()
-                        if selfKickTime == capturedPetKickTime and selfKickTime > 0 then
-                            selfKickTime = 0
-                            RecordMissedKick(myName)
-                        end
-                    end)
-                    -- Broadcast to party addon users (Warlock Felhunter Spell Lock
-                    -- fires on unit=="pet", not "player", so SendLOXX must be called here)
-                    SendLOXX("CAST:" .. cd)
+                    local token = NewMissToken()
+                    local mobGUID = UnitGUID("target") or ""
+                    pendingMissedKick[token] = {
+                        unit    = "target",
+                        mobGUID = mobGUID,
+                        timer   = C_Timer.NewTimer(1.5, function()
+                            pendingMissedKick[token] = nil
+                            if selfKickTime > 0 then
+                                selfKickTime = 0
+                                RecordMissedKick(myName)
+                            end
+                        end),
+                    }
+                    -- Broadcast to party addon users with retry (same policy as the player path).
+                    local petCastMsg = "CAST:" .. cd
+                    SendLOXX(petCastMsg)
+                    C_Timer.After(0.05, function() SendLOXX(petCastMsg) end)
+                    C_Timer.After(0.10, function() SendLOXX(petCastMsg) end)
                     RecordKick(myName)
                     if spyMode then
                         print("|cFF00DDDD[SPY]|r   → PRIMARY kick: " .. data.name .. " CD=" .. cd .. " (broadcast sent)")
@@ -3812,6 +4180,33 @@ end)
 
 -- recentPartyCasts declared at top of file (needed by UpdateDisplay miss detection)
 local activeChannels = {} -- unit → expected channel endTime (for CHANNEL_STOP early-end detection)
+-- pendingMissedKick: tracks active missed-kick timers so they can be cancelled if the
+-- mob dies or is CC'd before the window expires.
+-- Structure: token (opaque number) → { unit, mobGUID, timer }
+-- selfKickMissToken: current active token for the self-kick timer (0 = none active)
+local pendingMissedKick  = {}
+local missTokenCounter   = 0
+
+local function NewMissToken() missTokenCounter = missTokenCounter + 1; return missTokenCounter end
+
+-- Cancel and clean up a pending missed-kick timer by token.
+local function CancelMissToken(token)
+    local entry = pendingMissedKick[token]
+    if entry then
+        if entry.timer then entry.timer:Cancel() end
+        pendingMissedKick[token] = nil
+        DLog("MISS", "cancelled token=" .. token .. " (mob dead/CC/interrupted)")
+    end
+end
+
+-- Cancel all pending missed-kick timers for a given unit GUID (mob died/interrupted).
+local function CancelMissForGUID(guid)
+    for token, entry in pairs(pendingMissedKick) do
+        if entry.mobGUID == guid then
+            CancelMissToken(token)
+        end
+    end
+end
 
 -- Dedup: track last successful correlation to avoid double-counting when
 -- both nameplate and target frames fire for the same mob (within 0.1s)
@@ -3825,30 +4220,49 @@ local function OnMobInterrupted(unit)
         print("|cFF00DDDD[SPY-MOB]|r INTERRUPTED on " .. tostring(unit))
     end
 
-    -- A mob was interrupted! Find who kicked via time correlation
+    -- A mob was interrupted! Find who kicked via time correlation.
+    -- Window: 0.5s (tighter than the 0.8s capture window to reduce false attribution).
+    -- Tiebreak: if two candidates are within 0.05s of each other (same network tick),
+    -- prefer the one whose kick CD was most recently set (highest cdEnd), as that
+    -- player is more likely to have just used their interrupt.
     local now = GetTime()
     local bestName = nil
     local bestDelta = 999
+    local staleKeys = {}
 
     for name, ts in pairs(recentPartyCasts) do
         local delta = now - ts
-        if delta > 0.8 then
-            recentPartyCasts[name] = nil
+        if delta > 0.5 then
+            staleKeys[#staleKeys + 1] = name
         elseif delta < bestDelta then
-            bestDelta = delta
-            bestName = name
+            -- Tiebreak: prefer player with highest cdEnd when deltas are within 0.05s
+            if bestName and (bestDelta - delta) < 0.05 then
+                local bestCdEnd = (partyAddonUsers[bestName] and partyAddonUsers[bestName].cdEnd) or 0
+                local thisCdEnd = (partyAddonUsers[name] and partyAddonUsers[name].cdEnd) or 0
+                if thisCdEnd > bestCdEnd then
+                    bestDelta = delta
+                    bestName = name
+                end
+                -- else keep current best (same tick, lower cdEnd → less likely kicker)
+            else
+                bestDelta = delta
+                bestName = name
+            end
         end
     end
+    for _, k in ipairs(staleKeys) do recentPartyCasts[k] = nil end
 
-    if bestName and bestDelta < 0.8 then
+    if bestName and bestDelta < 0.5 then
         -- Consume the timestamp so duplicate INTERRUPTED events (nameplate + target
         -- firing for the same mob in the same frame) cannot match this player again.
         recentPartyCasts[bestName] = nil
 
         -- If SELF also cast an interrupt within the same window, consume selfKickTime
-        -- to prevent a false missed-kick detection via the C_Timer callback.
-        if selfKickTime > 0 and (now - selfKickTime) < 0.8 then
+        -- and cancel any pending missed-kick timers to prevent false attribution.
+        if selfKickTime > 0 and (now - selfKickTime) < 0.5 then
             selfKickTime = 0
+            local guid = UnitGUID(unit)
+            if guid then CancelMissForGUID(guid) end
         end
 
         -- Safety-net time-based dedup (catches edge cases where bestName changes)
@@ -3918,7 +4332,7 @@ local function OnMobInterrupted(unit)
         -- SELF's casts never enter recentPartyCasts (they go through myKickCdEnd directly).
         -- Fall back to the dedicated selfKickTime timestamp.
         local selfDelta = selfKickTime > 0 and (now - selfKickTime) or 999
-        if selfDelta < 0.8 then
+        if selfDelta < 1.5 then
             selfKickTime = 0
             -- Dedup: same mob may fire on multiple unit frames within the same tick
             if myName == lastCorrName and (now - lastCorrTime) < 0.2 then
@@ -3982,12 +4396,35 @@ mobInterruptFrame:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP",
     "boss1", "boss2", "boss3", "boss4", "boss5")
 mobInterruptFrame:SetScript("OnEvent", function(self, event, unit)
     if event == "UNIT_SPELLCAST_INTERRUPTED" then
+        -- A kick landed: cancel any pending missed-kick timer for this mob.
+        local guid = UnitGUID(unit)
+        if guid then CancelMissForGUID(guid) end
         OnMobInterrupted(unit)
     elseif event == "UNIT_SPELLCAST_CHANNEL_START" then
         OnMobChannelStart(unit)
     elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" then
         OnMobChannelStop(unit)
     end
+end)
+
+-- UNIT_DIED is a global event (not a unit event) in Midnight 12.0.
+-- We handle mob death via the main event frame to cancel pending missed-kick timers.
+local mobDeathFrame = CreateFrame("Frame")
+mobDeathFrame:RegisterEvent("UNIT_DIED")
+mobDeathFrame:SetScript("OnEvent", function(_, _, unit)
+    if not unit then return end
+    -- Only care about units we track: target, focus, boss frames.
+    if unit ~= "target" and unit ~= "focus"
+        and unit ~= "boss1" and unit ~= "boss2"
+        and unit ~= "boss3" and unit ~= "boss4" and unit ~= "boss5" then
+        return
+    end
+    local guid = UnitGUID(unit)
+    if guid then
+        CancelMissForGUID(guid)
+        DLog("MISS", "mob died (" .. tostring(unit) .. ") — pending miss timers cancelled")
+    end
+    activeChannels[unit] = nil
 end)
 
 -- Nameplate interrupt tracking: pre-create all 40 frames at load time (no leaks)
@@ -4116,8 +4553,11 @@ ef:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
         OnAddonMessage(arg1, arg2, arg3, arg4)
         -- SPELL_UPDATE_COOLDOWN removed (restricted in Midnight)
     elseif event == "SPELLS_CHANGED" then
+        local prevSpellID = mySpellID
         FindMyInterrupt()
-        AnnounceJoin()
+        if mySpellID ~= prevSpellID then
+            AnnounceJoin()
+        end
         -- For warlocks: pet spellbook may not be ready yet, retry
         if myClass == "WARLOCK" then
             C_Timer.After(1.5, FindMyInterrupt)
@@ -4126,21 +4566,33 @@ ef:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
     elseif event == "PLAYER_REGEN_ENABLED" then
         inCombat = false
         CheckZoneVisibility()
+        -- Switch to slow OOC ticker once combat ends (if no CDs are still ticking).
+        if RestartTicker then RestartTicker() end
     elseif event == "PLAYER_REGEN_DISABLED" then
         inCombat = true
         CheckZoneVisibility()
+        -- Always switch to fast combat ticker immediately on entering combat.
+        if RestartTicker then RestartTicker() end
     elseif event == "INSPECT_READY" then
         if inspectBusy and inspectUnit then
+            local targetName = UnitName(inspectUnit) or tostring(inspectUnit)
             local ok, err = pcall(ScanInspectTalents, inspectUnit)
-            if not ok and spyMode then
-                print("|cFFFF0000[SPY]|r Inspect scan error: " .. tostring(err))
+            if ok then
+                DLog("INSPECT", targetName .. " scan OK")
+            else
+                DLog("INSPECT", targetName .. " scan ERROR: " .. tostring(err))
+                LoxxLogError("INSPECT_READY scan failed for " .. targetName .. ": " .. tostring(err))
+                if spyMode then
+                    print("|cFFFF0000[SPY]|r Inspect scan error: " .. tostring(err))
+                end
             end
-            SetDisplayDirty() -- spec/talents may have changed kick or added extra kicks
+            SetDisplayDirty()
             ClearInspectPlayer()
             inspectBusy = false
             inspectUnit = nil
             C_Timer.After(0.5, ProcessInspectQueue)
         end
+
     elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
         local changedUnit = arg1
         if changedUnit and changedUnit ~= "player" then
@@ -4148,7 +4600,6 @@ ef:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
             if name then
                 inspectedPlayers[name] = nil
                 noInterruptPlayers[name] = nil
-                -- Re-register with class default
                 local _, cls = UnitClass(changedUnit)
                 if cls and CLASS_INTERRUPTS[cls] then
                     local kickInfo = GetClassKickInfo(cls, changedUnit)
@@ -4160,19 +4611,29 @@ ef:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
                             cdEnd = 0,
                             onKickReduction = nil,
                         }
+                        DLog("SPEC", name .. " spec changed → cls=" .. tostring(cls)
+                            .. " spellID=" .. tostring(kickInfo.id) .. " cd=" .. tostring(kickInfo.cd))
                         SetDisplayDirty()
+                    else
+                        DLog("SPEC", name .. " spec changed → cls=" .. tostring(cls) .. " (no kickInfo)")
                     end
+                else
+                    DLog("SPEC", name .. " spec changed → cls=" .. tostring(cls) .. " (no interrupt)")
                 end
                 if spyMode then
                     print("|cFF00DDDD[SPY]|r " .. name .. " changed spec → re-inspecting")
                 end
                 C_Timer.After(1, QueuePartyInspect)
             end
+        elseif changedUnit == "player" then
+            DLog("SPEC", "SELF spec changed → re-detecting interrupt")
+            C_Timer.After(0.5, FindMyInterrupt)
         end
+
     elseif event == "UNIT_PET" then
         local unit = arg1
-        -- Own pet changed → re-detect our kicks (multiple retries as pet spellbook loads slowly)
         if unit == "player" then
+            DLog("PET", "SELF pet changed → re-detecting interrupt (3 retries)")
             C_Timer.After(0.5, FindMyInterrupt)
             C_Timer.After(1.5, FindMyInterrupt)
             C_Timer.After(3.0, FindMyInterrupt)
@@ -4182,20 +4643,20 @@ ef:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
                 end)
             end
         end
-        -- Party pet changed → re-inspect and re-register watchers
         RegisterPartyWatchers()
         if unit and unit:find("^party") then
             local name = UnitName(unit)
             if name then
                 inspectedPlayers[name] = nil
+                DLog("PET", name .. " pet changed → re-inspecting")
                 C_Timer.After(1, QueuePartyInspect)
                 if spyMode then
                     print("|cFF00DDDD[SPY]|r " .. name .. " pet changed → re-inspecting")
                 end
             end
         end
+
     elseif event == "ROLE_CHANGED_INFORM" then
-        -- Roles changed → remove healers without kick
         for i = 1, 4 do
             local u = "party" .. i
             if UnitExists(u) then
@@ -4205,46 +4666,52 @@ ef:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
                 if name and role == "HEALER" and cls ~= "SHAMAN" and partyAddonUsers[name] then
                     partyAddonUsers[name] = nil
                     noInterruptPlayers[name] = true
+                    DLog("ROLE", name .. " → HEALER (" .. tostring(cls) .. ") removed from tracker")
                     SetDisplayDirty()
                     if spyMode then
                         print("|cFF00DDDD[SPY]|r Role changed: " .. name .. " is HEALER (" .. cls .. ") → removed")
                     end
+                elseif name then
+                    DLog("ROLE", name .. " → role=" .. tostring(role) .. " cls=" .. tostring(cls) .. " (no change)")
                 end
             end
         end
+
     elseif event == "GROUP_ROSTER_UPDATE" then
+        DLog("GROUP", "GROUP_ROSTER_UPDATE — size=" .. GetNumGroupMembers())
         CleanPartyList()
         RegisterPartyWatchers()
         AutoRegisterPartyByClass()
-        CheckZoneVisibility() -- hide/show based on group size (raid = 6+)
-        -- Rebuild bars if group size changed category (5 → 10 → 20 → 40)
+        CheckZoneVisibility()
         if UpdateMaxBars() then RebuildBars() end
-        -- Queue inspect for new members (1s delay for units to be ready)
         C_Timer.After(1, QueuePartyInspect)
+
     elseif event == "PLAYER_ENTERING_WORLD" then
-        inCombat = InCombatLockdown() -- vrai si reload UI en combat
+        inCombat = InCombatLockdown()
         pcall(C_ChatInfo.RegisterAddonMessagePrefix, MSG_PREFIX)
+        local inInst, instType = IsInInstance()
+        DLog("WORLD", "PLAYER_ENTERING_WORLD inInst=" .. tostring(inInst) .. " type=" .. tostring(instType))
         CheckZoneVisibility()
         RegisterPartyWatchers()
         AutoRegisterPartyByClass()
-        -- Stats: start new run if entering a new instance
-        local inInst, instType = IsInInstance()
         if inInst and (instType == "party" or instType == "raid" or instType == "arena") then
             local _, _, _, _, _, _, _, newInstanceID = GetInstanceInfo()
             if not loxxCurrentRun or loxxCurrentRun.instanceID ~= newInstanceID then
+                DLog("WORLD", "New instance detected (id=" .. tostring(newInstanceID) .. ") → StartNewRun")
                 StartNewRun()
             end
         end
         C_Timer.After(1, AutoRegisterPartyByClass)
-        C_Timer.After(2, QueuePartyInspect) -- inspect any not-yet-inspected members
+        C_Timer.After(2, QueuePartyInspect)
         C_Timer.After(3, function()
             FindMyInterrupt()
             AnnounceJoin()
             AutoRegisterPartyByClass()
         end)
+
     elseif event == "CHALLENGE_MODE_START" then
+        DLog("CM", "CHALLENGE_MODE_START")
         StartNewRun()
-        -- Auto-start dungeon log on M+ key start
         loxxDungeonLog = {}
         loxxDungeonLogActive = true
         local party = {}
@@ -4265,8 +4732,19 @@ ef:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
         end
         DLog("START", "M+ key started — party: " .. (next(party) and table.concat(party, ", ") or "solo"))
         print("|cFF00DDDD[LOXX]|r Dungeon log started. /loxx record show to view.")
+
+    elseif event == "CHALLENGE_MODE_COMPLETED" then
+        DLog("CM", "CHALLENGE_MODE_COMPLETED")
+        ArchiveCurrentRun()
+        loxxCurrentRun = nil
+
+    elseif event == "CHALLENGE_MODE_RESET" then
+        DLog("CM", "CHALLENGE_MODE_RESET")
+        ArchiveCurrentRun()
+        loxxCurrentRun = nil
+
     elseif event == "PLAYER_LOGOUT" then
-        ArchiveCurrentRun() -- persist current run even if no new run started
+        ArchiveCurrentRun()
         if mainFrame then LoxxSaveFramePosition(mainFrame) end
     end
 end)
