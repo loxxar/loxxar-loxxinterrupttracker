@@ -1,0 +1,10 @@
+v1.4.1
+• Missed kick badge: red "xN" indicator on each bar when kicks were missed this run
+• Run stats now archive automatically when a Mythic+ key is completed or reset
+• Right-click the tracker window to open Settings
+• New setting: sort bars alphabetically instead of by cooldown
+• /loxx miss: print missed kick summary for the current run
+• /loxx export: print a full run summary to chat
+• JOIN throttle increased to 30s to reduce addon message spam
+• Self interrupt correlation window extended for high-latency environments
+• baseCd guard: fallback to 15s minimum if inspected CD is below 5s
