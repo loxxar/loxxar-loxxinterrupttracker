@@ -46,7 +46,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.4.2"
+local LOXX_VERSION = "1.4.3"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -216,6 +216,9 @@ local myExtraKicks         = {}    -- extra kicks for own player {spellID → {b
 local partyAddonUsers      = {}
 local recentPartyCasts     = {}    -- name → timestamp of last interrupt cast (for MOB INTERRUPTED correlation)
 local activeChannels       = {}    -- unit → expected channel endTime (for CHANNEL_STOP early-end detection)
+local pendingMissedKick    = {}    -- token → { unit, mobGUID, timer }
+local missTokenCounter     = 0
+local function NewMissToken() missTokenCounter = missTokenCounter + 1; return missTokenCounter end
 local bars                 = {}
 local cachedPartyEntries   = {}    -- reused table; rebuilt only when displayDirty=true
 local displayDirty         = true  -- true = rebuild cachedPartyEntries from scratch next tick
@@ -4181,14 +4184,7 @@ end)
 
 -- recentPartyCasts declared at top of file (needed by UpdateDisplay miss detection)
 -- activeChannels declared at top of file (used by periodic ticker at addon init)
--- pendingMissedKick: tracks active missed-kick timers so they can be cancelled if the
--- mob dies or is CC'd before the window expires.
--- Structure: token (opaque number) → { unit, mobGUID, timer }
--- selfKickMissToken: current active token for the self-kick timer (0 = none active)
-local pendingMissedKick  = {}
-local missTokenCounter   = 0
-
-local function NewMissToken() missTokenCounter = missTokenCounter + 1; return missTokenCounter end
+-- pendingMissedKick/NewMissToken declared at top of file (used before this point)
 
 -- Cancel and clean up a pending missed-kick timer by token.
 local function CancelMissToken(token)

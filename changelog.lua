@@ -4,6 +4,9 @@
 ]]
 
 LOXX_CHANGELOG = [[
+|cFFFFD100v1.4.3|r
+• Fix: error when casting an interrupt (NewMissToken nil)
+
 |cFFFFD100v1.4.2|r
 • Fix: startup error causing addon to break on load
 
