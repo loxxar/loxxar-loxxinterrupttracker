@@ -1,3 +1,6 @@
+v1.4.2
+• Fix: startup error (activeChannels nil) causing addon to break on load
+
 v1.4.1
 • Missed kick badge: red "xN" indicator on each bar when kicks were missed this run
 • Run stats now archive automatically when a Mythic+ key is completed or reset

@@ -4,6 +4,9 @@
 ]]
 
 LOXX_CHANGELOG = [[
+|cFFFFD100v1.4.2|r
+• Fix: startup error causing addon to break on load
+
 |cFFFFD100v1.4.1|r
 • Kick attribution is now more accurate, especially when multiple players interrupt at the same time
 • Missed kicks are no longer falsely reported when a mob dies or gets CC'd
