@@ -215,6 +215,7 @@ local myIsPetSpell         = false -- is our primary kick a pet spell?
 local myExtraKicks         = {}    -- extra kicks for own player {spellID → {baseCd, cdEnd}}
 local partyAddonUsers      = {}
 local recentPartyCasts     = {}    -- name → timestamp of last interrupt cast (for MOB INTERRUPTED correlation)
+local activeChannels       = {}    -- unit → expected channel endTime (for CHANNEL_STOP early-end detection)
 local bars                 = {}
 local cachedPartyEntries   = {}    -- reused table; rebuilt only when displayDirty=true
 local displayDirty         = true  -- true = rebuild cachedPartyEntries from scratch next tick
@@ -4179,7 +4180,7 @@ end)
 
 
 -- recentPartyCasts declared at top of file (needed by UpdateDisplay miss detection)
-local activeChannels = {} -- unit → expected channel endTime (for CHANNEL_STOP early-end detection)
+-- activeChannels declared at top of file (used by periodic ticker at addon init)
 -- pendingMissedKick: tracks active missed-kick timers so they can be cancelled if the
 -- mob dies or is CC'd before the window expires.
 -- Structure: token (opaque number) → { unit, mobGUID, timer }
