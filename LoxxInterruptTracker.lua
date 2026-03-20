@@ -46,7 +46,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.4.3"
+local LOXX_VERSION = "1.4.4"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -216,7 +216,7 @@ local myExtraKicks         = {}    -- extra kicks for own player {spellID → {b
 local partyAddonUsers      = {}
 local recentPartyCasts     = {}    -- name → timestamp of last interrupt cast (for MOB INTERRUPTED correlation)
 local activeChannels       = {}    -- unit → expected channel endTime (for CHANNEL_STOP early-end detection)
-local pendingMissedKick    = {}    -- token → { unit, mobGUID, timer }
+local pendingMissedKick    = {}    -- token → { unit, timer }
 local missTokenCounter     = 0
 local function NewMissToken() missTokenCounter = missTokenCounter + 1; return missTokenCounter end
 local bars                 = {}
@@ -900,11 +900,9 @@ local function OnSpellCastSucceeded(unit, castGUID, spellID, isParty, cleanName)
         myExtraKicks[spellID].cdEnd = GetTime() + myExtraKicks[spellID].baseCd
         selfKickTime = GetTime()
         local token = NewMissToken()
-        local mobGUID = UnitGUID("target") or ""
         pendingMissedKick[token] = {
-            unit    = "target",
-            mobGUID = mobGUID,
-            timer   = C_Timer.NewTimer(1.5, function()
+            unit  = "target",
+            timer = C_Timer.NewTimer(1.5, function()
                 pendingMissedKick[token] = nil
                 if selfKickTime > 0 then
                     selfKickTime = 0
@@ -925,11 +923,9 @@ local function OnSpellCastSucceeded(unit, castGUID, spellID, isParty, cleanName)
         myExtraKicks[spellID] = { baseCd = data.cd, cdEnd = GetTime() + data.cd }
         selfKickTime = GetTime()
         local token = NewMissToken()
-        local mobGUID = UnitGUID("target") or ""
         pendingMissedKick[token] = {
-            unit    = "target",
-            mobGUID = mobGUID,
-            timer   = C_Timer.NewTimer(1.5, function()
+            unit  = "target",
+            timer = C_Timer.NewTimer(1.5, function()
                 pendingMissedKick[token] = nil
                 if selfKickTime > 0 then
                     selfKickTime = 0
@@ -947,11 +943,9 @@ local function OnSpellCastSucceeded(unit, castGUID, spellID, isParty, cleanName)
     myKickCdEnd = GetTime() + cd
     selfKickTime = GetTime()
     local token = NewMissToken()
-    local mobGUID = UnitGUID("target") or ""
     pendingMissedKick[token] = {
-        unit    = "target",
-        mobGUID = mobGUID,
-        timer   = C_Timer.NewTimer(1.5, function()
+        unit  = "target",
+        timer = C_Timer.NewTimer(1.5, function()
             pendingMissedKick[token] = nil
             if selfKickTime > 0 then
                 selfKickTime = 0
@@ -4150,11 +4144,9 @@ playerCastFrame:SetScript("OnEvent", function(_, _, unit, castGUID, spellID)
                     myKickCdEnd = GetTime() + cd
                     selfKickTime = GetTime()
                     local token = NewMissToken()
-                    local mobGUID = UnitGUID("target") or ""
                     pendingMissedKick[token] = {
-                        unit    = "target",
-                        mobGUID = mobGUID,
-                        timer   = C_Timer.NewTimer(1.5, function()
+                        unit  = "target",
+                        timer = C_Timer.NewTimer(1.5, function()
                             pendingMissedKick[token] = nil
                             if selfKickTime > 0 then
                                 selfKickTime = 0
@@ -4197,11 +4189,11 @@ local function CancelMissToken(token)
 end
 
 -- Cancel all pending missed-kick timers for a given unit GUID (mob died/interrupted).
-local function CancelMissForGUID(guid)
-    for token, entry in pairs(pendingMissedKick) do
-        if entry.mobGUID == guid then
-            CancelMissToken(token)
-        end
+local function CancelMissForGUID(_guid)
+    -- WoW 12.0: UnitGUID returns a secret/tainted string that cannot be compared.
+    -- In practice at most one mob is targeted at a time, so cancel all pending timers.
+    for token in pairs(pendingMissedKick) do
+        CancelMissToken(token)
     end
 end
 
@@ -4411,11 +4403,13 @@ mobDeathFrame:RegisterEvent("UNIT_DIED")
 mobDeathFrame:SetScript("OnEvent", function(_, _, unit)
     if not unit then return end
     -- Only care about units we track: target, focus, boss frames.
-    if unit ~= "target" and unit ~= "focus"
-        and unit ~= "boss1" and unit ~= "boss2"
-        and unit ~= "boss3" and unit ~= "boss4" and unit ~= "boss5" then
-        return
-    end
+    -- WoW 12.0: unit is a secret string value; wrap comparison in pcall
+    local ok, isTracked = pcall(function()
+        return (unit == "target" or unit == "focus"
+            or unit == "boss1" or unit == "boss2"
+            or unit == "boss3" or unit == "boss4" or unit == "boss5")
+    end)
+    if not ok or not isTracked then return end
     local guid = UnitGUID(unit)
     if guid then
         CancelMissForGUID(guid)
