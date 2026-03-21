@@ -4,6 +4,19 @@
 ]]
 
 LOXX_CHANGELOG = [[
+|cFFFFD100v1.5.0|r
+• CC Tracker — dedicated window tracking crowd-control per class (Polymorph, Blind, etc.)
+• Healer support — tracker now visible even when your spec has no interrupt
+• All satellite windows are sticky to the Settings window and close together with it
+• Brewmaster/Windwalker Monk now correctly detected when group data loads slowly
+• Spell school lock detection — channels cut short trigger an interrupt credit
+
+|cFFFFD100v1.4.4|r
+• Player death detection — bar resets to CD 0 immediately when a party member dies
+• Interruptible cast alert — flash + sound when a mob starts a kickable cast
+• /loxx score — all-time kick/miss ratio per player
+• /loxx csv — export full all-time stats to chat (CSV format)
+
 |cFFFFD100v1.4.3|r
 • Fix: error when casting an interrupt (NewMissToken nil)
 

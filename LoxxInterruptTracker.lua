@@ -46,7 +46,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.4.4"
+local LOXX_VERSION = "1.5.0"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -70,7 +70,8 @@ local ALL_INTERRUPTS = {
     [132409]  = { name = "Spell Lock", cd = 24, icon = 136174 },
     [119914]  = { name = "Axe Toss", cd = 30, icon = "Interface\\Icons\\ability_warrior_titansgrip" },
     [1276467] = { name = "Fel Ravager", cd = 25, icon = "Interface\\Icons\\spell_shadow_summonfelhunter" },
-    [351338]  = { name = "Quell", cd = 20, icon = 4622469 },
+    [351338]  = { name = "Quell", cd = 20, icon = 4622469 },  -- Devastation: 20s / Augmentation: 18s (override) / Preservation: no kick
+    [15487]   = { name = "Silence", cd = 30, icon = 136207 },  -- Shadow Priest (Disc/Holy filtered by SPEC_NO_INTERRUPT)
 }
 
 -- Which spells to check per class (order matters: first found wins)
@@ -87,6 +88,7 @@ local CLASS_INTERRUPT_LIST = {
     HUNTER      = { 147362, 187707 }, -- Counter Shot (BM/MM), Muzzle (survival)
     WARLOCK     = { 19647, 132409, 119914 },
     EVOKER      = { 351338 },
+    PRIEST      = { 15487 },  -- Silence (Shadow only; Disc/Holy filtered by SPEC_NO_INTERRUPT)
 }
 
 local CLASS_COLORS = {
@@ -153,6 +155,22 @@ local DEFAULTS = {
     fontColorPreset   = 1,
     barTexturePreset  = 1,
     sortAlpha         = false,
+    alertOnCast       = false,
+    maxRunHistory     = 50,
+    showCCTracker     = false,
+    ccFrameX          = nil,
+    ccFrameY          = nil,
+    ccHiddenClasses   = {},
+    configFrameX      = nil,
+    configFrameY      = nil,
+    changelogFrameX   = nil,
+    changelogFrameY   = nil,
+    statsFrameX       = nil,
+    statsFrameY       = nil,
+    scoreFrameX       = nil,
+    scoreFrameY       = nil,
+    ccConfigFrameX    = nil,
+    ccConfigFrameY    = nil,
 }
 
 ------------------------------------------------------------
@@ -214,6 +232,11 @@ local selfKickTime         = 0     -- timestamp of our last interrupt cast (for 
 local myIsPetSpell         = false -- is our primary kick a pet spell?
 local myExtraKicks         = {}    -- extra kicks for own player {spellID → {baseCd, cdEnd}}
 local partyAddonUsers      = {}
+local ccAddonUsers         = {}   -- CC Tracker: name → { class, spellID, spellName, baseCd, cdEnd, icon }
+local ccFrame              = nil  -- CC Tracker window
+local ccBars               = {}   -- CC bar frames
+local ccDirty              = true -- rebuild CC bar list next tick
+local ccTicker             = nil  -- CC update ticker
 local recentPartyCasts     = {}    -- name → timestamp of last interrupt cast (for MOB INTERRUPTED correlation)
 local activeChannels       = {}    -- unit → expected channel endTime (for CHANNEL_STOP early-end detection)
 local pendingMissedKick    = {}    -- token → { unit, timer }
@@ -223,6 +246,10 @@ local bars                 = {}
 local cachedPartyEntries   = {}    -- reused table; rebuilt only when displayDirty=true
 local displayDirty         = true  -- true = rebuild cachedPartyEntries from scratch next tick
 local playerWasOnCd        = false -- own kick: was on CD last tick (for sound-on-ready)
+local partyDeadFlags       = {}    -- name → true when party member is dead (death ticker)
+local lastMobCastName      = nil   -- last interruptible spell name detected on a mob
+local mobSchoolLock        = { name = nil, endTime = 0 }  -- active school-lock state
+local currentMobCasting    = false -- true while a mob is actively casting something interruptible
 local MAX_BARS             = 40    -- absolute cap (supports up to 40-man raids)
 local currentMaxBars       = 7     -- updated dynamically based on group size
 local mainFrame, titleText, configFrame
@@ -238,8 +265,14 @@ local spyMode              = false
 -- Forward declarations: defined later in the stats block but called earlier
 local RecordKick
 local RecordMissedKick
+local StartNewRun          -- defined in the stats block; used by /loxx reset
+local PopulateCCUsers      -- defined in the CC Tracker block
+local CreateCCFrame        -- defined in the CC Tracker block
+local ccConfigFrame        = nil  -- forward declaration (used in sticky OnDragStop handlers)
+local ProcessInspectQueue  -- forward declaration (defined in inspect block)
 local loxxCurrentRun       = nil -- stats: current instance run
 local statsFrame           = nil -- stats window
+local scoreFrame           = nil -- score window
 -- Error log (in-memory, also persisted via SavedVars)
 local loxxErrorLog         = {}
 local loxxDungeonLog       = {}
@@ -362,6 +395,24 @@ local CC_SPELLS = {
     [5246]   = { name = "Intimidating Shout",    class = "WARRIOR", dr = "Disorients" },
 }
 
+-- Primary CC ability per class tracked in the CC Tracker window.
+-- cd = 0 means the spell has no real cooldown (still tracked briefly after cast).
+local CC_CLASS_PRIMARY = {
+    MAGE        = { spellID = 118,    name = "Polymorph",             cd = 0   },
+    SHAMAN      = { spellID = 51514,  name = "Hex",                   cd = 0   },
+    HUNTER      = { spellID = 187650, name = "Freezing Trap",         cd = 25  },
+    ROGUE       = { spellID = 2094,   name = "Blind",                 cd = 120 },
+    PALADIN     = { spellID = 853,    name = "Hammer of Justice",     cd = 60  },
+    DRUID       = { spellID = 99,     name = "Incapacitating Roar",   cd = 30  },
+    WARLOCK     = { spellID = 5782,   name = "Fear",                  cd = 0   },
+    MONK        = { spellID = 115078, name = "Paralysis",             cd = 15  },
+    DEMONHUNTER = { spellID = 217832, name = "Imprison",              cd = 15  },
+    DEATHKNIGHT = { spellID = 108194, name = "Asphyxiate",            cd = 45  },
+    PRIEST      = { spellID = 8122,   name = "Psychic Scream",        cd = 45  },
+    WARRIOR     = { spellID = 5246,   name = "Intimidating Shout",    cd = 90  },
+    EVOKER      = { spellID = 360806, name = "Sleep Walk",            cd = 0   },
+}
+
 -- String-keyed versions of talent tables.
 -- C_Traits.GetDefinitionInfo returns defInfo.spellID as a secret value in WoW 12.0+,
 -- which can't be used as a numeric table key. Fallback: convert to string.
@@ -382,15 +433,17 @@ local CLASS_INTERRUPTS         = {
     HUNTER      = { id = 147362, cd = 24, name = "Counter Shot" },
     MONK        = { id = 116705, cd = 15, name = "Spear Hand Strike" },
     WARLOCK     = { id = 19647, cd = 24, name = "Spell Lock" },
-    EVOKER      = { id = 351338, cd = 20, name = "Quell" },
-    PRIEST      = { id = 15487,  cd = 45, name = "Silence" }, -- Shadow only; Disc/Holy removed via SPEC_NO_INTERRUPT on inspect
+    EVOKER      = { id = 351338, cd = 20, name = "Quell" },  -- Devastation base; Augmentation override below
+    PRIEST      = { id = 15487,  cd = 30, name = "Silence" }, -- Shadow only; Disc/Holy removed via SPEC_NO_INTERRUPT on inspect
 }
 
 -- SpecID → interrupt override (when spec changes the interrupt or CD)
 local SPEC_INTERRUPT_OVERRIDES = {
-    [255] = { id = 187707, cd = 15, name = "Muzzle" },                                     -- Survival Hunter
-    [264] = { id = 57994, cd = 30, name = "Wind Shear" },                                  -- Restoration Shaman (30s vs 12s for Ele/Enh)
-    [266] = { id = 119914, cd = 30, name = "Axe Toss", isPet = true, petSpellID = 89766 }, -- Demonology Warlock (Felguard)
+    [255]  = { id = 187707, cd = 15, name = "Muzzle" },        -- Survival Hunter
+    [264]  = { id = 57994,  cd = 30, name = "Wind Shear" },   -- Restoration Shaman (30s in 12.0.1)
+    [1473] = { id = 351338, cd = 18, name = "Quell" },        -- Augmentation Evoker (18s)
+    -- Devastation uses base CLASS_INTERRUPTS (20s)
+    [266]  = { id = 119914, cd = 30, name = "Axe Toss", isPet = true, petSpellID = 89766 }, -- Demonology: Axe Toss primary (30s)
 }
 
 local function GetClassKickInfo(cls, unit)
@@ -413,7 +466,7 @@ local SPEC_NO_INTERRUPT = {
     [105]  = true, -- Restoration Druid
     [65]   = true, -- Holy Paladin
     [1468] = true, -- Preservation Evoker
-    [270]  = true, -- Mistweaver Monk
+    [270]  = true, -- Mistweaver Monk (no kick in 12.0.1)
 }
 
 -- Talents that PERMANENTLY reduce interrupt cooldowns (scanned via inspect)
@@ -446,10 +499,9 @@ local SPEC_EXTRA_KICKS = {
         {
             id = 132409,
             cd = 24,
-            name = "Fel Ravager / Spell Lock",
+            name = "Spell Lock",
             icon = "Interface\\Icons\\spell_shadow_summonfelhunter",
-            talentCheck = 1276467
-        }, -- Check if Grimoire: Fel Ravager talent is known
+        }, -- Demonology extra: Spell Lock via Felhunter (24s)
     },
 }
 
@@ -649,7 +701,7 @@ local function AnnounceJoin()
     if now - lastAnnounce < 30 then return end
     lastAnnounce = now
     ReadMyBaseCd()
-    local cd = myBaseCd or ALL_INTERRUPTS[mySpellID].cd
+    local cd = myBaseCd or (ALL_INTERRUPTS[mySpellID] and ALL_INTERRUPTS[mySpellID].cd) or 15
     -- Append addon version so peers can identify protocol capabilities.
     -- Field is optional and ignored by older versions (backward-compatible).
     local joinMsg = "JOIN:" .. myClass .. ":" .. mySpellID .. ":" .. cd .. ":" .. LOXX_VERSION
@@ -783,6 +835,12 @@ local function OnAddonMessage(prefix, message, channel, sender)
             DLog("SYNC", "STATE from " .. shortName .. " ignored — not in partyAddonUsers")
         end
 
+    elseif command == "HELLO" then
+        -- Sent by non-kicker addon users (healers etc.) on init.
+        -- We reply with our JOIN so they can see our kick CD.
+        DLog("COMM", "HELLO from " .. shortName .. " → replying with JOIN")
+        AnnounceJoin()
+
     elseif command == "REQ_STATE" then
         -- A peer detected a desync and is asking for our current state.
         -- Reply immediately with a STATE if we are on CD.
@@ -793,6 +851,38 @@ local function OnAddonMessage(prefix, message, channel, sender)
             SendLOXX("STATE:" .. string.format("%.1f", remaining))
         else
             DLog("SYNC", "REQ_STATE from " .. shortName .. " → no reply (not on CD)")
+        end
+
+    elseif command == "CCCAST" then
+        -- CC Tracker sync: peer used their CC ability.  format: CCCAST:spellID:cd
+        local spellID = tonumber(parts[2])
+        local cd      = tonumber(parts[3])
+        if spellID and cd then
+            if not ccAddonUsers[shortName] then
+                -- First time we see this player in the CC table — auto-create entry
+                local ccSpell = CC_SPELLS[spellID]
+                if ccSpell then
+                    ccAddonUsers[shortName] = {
+                        class     = ccSpell.class,
+                        spellID   = spellID,
+                        spellName = ccSpell.name,
+                        baseCd    = cd,
+                        cdEnd     = 0,
+                        icon      = (function() local ok,t = pcall(C_Spell.GetSpellTexture, spellID); return ok and t or nil end)(),
+                    }
+                end
+            end
+            if ccAddonUsers[shortName] then
+                local newEnd = GetTime() + cd
+                if newEnd > (ccAddonUsers[shortName].cdEnd or 0) then
+                    ccAddonUsers[shortName].cdEnd    = newEnd
+                    ccAddonUsers[shortName].spellID  = spellID
+                    local ccSpell = CC_SPELLS[spellID]
+                    if ccSpell then ccAddonUsers[shortName].spellName = ccSpell.name end
+                end
+                ccDirty = true
+                DLog("CCCAST", shortName .. " cd=" .. cd .. "s spellID=" .. tostring(spellID))
+            end
         end
     end
 end
@@ -984,7 +1074,11 @@ local function CleanPartyList()
         if not currentNames[name] then inspectedPlayers[name] = nil end
     end
     SetDisplayDirty()
-    AnnounceJoin()
+    if mySpellID then
+        AnnounceJoin()
+    elseif IsInGroup() then
+        SendLOXX("HELLO")
+    end
 end
 
 -- Auto-register party members by class (no addon comms needed!)
@@ -1021,15 +1115,24 @@ local function AutoRegisterPartyByClass()
                         end
                     elseif cls == "MONK" and UnitPowerType(u) == nil then
                         -- MONK spec is critical (Mistweaver = no kick, WW/BM = has kick).
-                        -- Power type not yet available → can't safely determine spec.
-                        -- Defer to inspect instead of risking a Mistweaver registration.
+                        -- Power type not yet available → register optimistically as WW/BM
+                        -- (Spear Hand Strike), and queue inspect to remove if Mistweaver.
+                        local kickInfo = GetClassKickInfo(cls, u)
+                        partyAddonUsers[name] = {
+                            class   = cls,
+                            spellID = kickInfo.id,
+                            baseCd  = kickInfo.cd,
+                            cdEnd   = 0,
+                        }
+                        SetDisplayDirty()
                         if not inspectedPlayers[name] then
                             table.insert(inspectQueue, u)
                             C_Timer.After(0.1, ProcessInspectQueue)
                         end
                         if spyMode then
                             print("|cFF00DDDD[SPY]|r " .. name ..
-                                " (MONK) power type unavailable - deferring to inspect")
+                                " (MONK) power type unavailable - registered optimistically," ..
+                                " queued inspect to confirm spec")
                         end
                     else
                         local kickInfo = GetClassKickInfo(cls, u)
@@ -1548,6 +1651,15 @@ local function RebuildBars()
         badge:Hide()
         f.missedBadge = badge
 
+        -- Dead badge ("DEAD" top-right of bar, shown when player is dead)
+        local deadBadge = content:CreateFontString(nil, "OVERLAY")
+        deadBadge:SetFont(FONT_FACE, 9, "OUTLINE")
+        deadBadge:SetTextColor(0.9, 0.15, 0.15, 1)
+        deadBadge:SetPoint("TOPRIGHT", -4, -2)
+        deadBadge:SetText("DEAD")
+        deadBadge:Hide()
+        f.deadBadge = deadBadge
+
         f:EnableMouse(true)
         f:SetScript("OnEnter", function(self)
             if not db.showTooltip then return end
@@ -1697,6 +1809,17 @@ local function UpdateAlertBand(numVisible, now)
         end
     end
 
+    -- School lock indicator: if a mob spell was recently interrupted,
+    -- show a purple "LOCKED" strip for 6s (generic lock duration).
+    if mobSchoolLock.endTime > now and mobSchoolLock.name then
+        local rem = mobSchoolLock.endTime - now
+        mainFrame.alertBand:Show()
+        mainFrame.alertBand.bg:SetVertexColor(0.30, 0.0, 0.50, 0.9)
+        mainFrame.alertBand.label:SetText(
+            "|cFFCC44FF" .. string.format(L["ALERT_LOCKED"], mobSchoolLock.name, rem) .. "|r")
+        return 22
+    end
+
     mainFrame.alertBand:Show()
     if readyCount > 0 then
         mainFrame.alertBand.bg:SetVertexColor(0.0, 0.28, 0.0, 0.9)
@@ -1712,9 +1835,16 @@ local function UpdateAlertBand(numVisible, now)
         mainFrame.alertBand.label:SetText(
             "|cFFFFAA00" .. string.format(L["ALERT_INCOMING"], nextKicker or "?", minRem) .. "|r")
     elseif minRem then
-        mainFrame.alertBand.bg:SetVertexColor(0.50, 0.0, 0.0, 0.9)
-        mainFrame.alertBand.label:SetText(
-            "|cFFFF3030" .. string.format(L["ALERT_NO_KICK"], minRem) .. "|r")
+        -- If a mob is currently casting and nobody can kick, escalate the alert.
+        if currentMobCasting and lastMobCastName then
+            mainFrame.alertBand.bg:SetVertexColor(0.70, 0.0, 0.0, 1.0)
+            mainFrame.alertBand.label:SetText(
+                "|cFFFF0000" .. string.format(L["ALERT_NO_KICK_CAST"], lastMobCastName) .. "|r")
+        else
+            mainFrame.alertBand.bg:SetVertexColor(0.50, 0.0, 0.0, 0.9)
+            mainFrame.alertBand.label:SetText(
+                "|cFFFF3030" .. string.format(L["ALERT_NO_KICK"], minRem) .. "|r")
+        end
     else
         mainFrame.alertBand:Hide()
         return 0
@@ -1760,6 +1890,14 @@ local function UpdateDisplay()
                 bar.missedBadge:Hide()
             end
         end
+        -- Dead badge
+        if bar.deadBadge then
+            if partyDeadFlags[name] then
+                bar.deadBadge:Show()
+            else
+                bar.deadBadge:Hide()
+            end
+        end
         if rem > 0.5 then
             bar.cdBar:SetValue(rem)
             bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
@@ -1783,6 +1921,7 @@ local function UpdateDisplay()
     local mySpellData = mySpellID and ALL_INTERRUPTS[mySpellID]
     if mySpellData then
         local bar = bars[barIdx]
+        if not bar then return end
         bar:Show()
         bar.icon:SetTexture(mySpellData.icon)
         local col = CLASS_COLORS[myClass] or { 1, 1, 1 }
@@ -1842,6 +1981,7 @@ local function UpdateDisplay()
         local ekIcon = ekInfo.icon or (ekData and ekData.icon)
         if ekIcon or ekData then
             local bar = bars[barIdx]
+            if not bar then break end
             bar:Show()
             bar.icon:SetTexture(ekIcon or (ekData and ekData.icon))
             local col = CLASS_COLORS[myClass] or { 1, 1, 1 }
@@ -1979,6 +2119,7 @@ local function UpdateDisplay()
     for _, e in ipairs(cachedPartyEntries) do
         if barIdx > currentMaxBars then break end
         local bar = bars[barIdx]
+        if not bar then break end
         if e.kind == "party" then
             local col = CLASS_COLORS[e.info.class] or { 1, 1, 1 }
             RenderPartyBar(bar, e.data.icon, e.name, col, e.baseCd, e.rem, e.data.name, e.isEstimated)
@@ -2003,12 +2144,8 @@ local function UpdateDisplay()
 
     local numVisible = barIdx - 1
 
-    -- Hide frame when solo and nothing to show; re-show it as soon as bars appear.
-    if numVisible == 0 and GetNumGroupMembers() == 0 then
-        mainFrame:Hide()
-        return
-    end
-    -- If the frame was hidden by the block above and we now have bars, restore it.
+    -- If zone/combat settings say we should show, always respect that.
+    -- (solo + empty is fine — the noKickLabel will appear below)
     if not mainFrame:IsShown() and shouldShowByZone and (not db.hideOutOfCombat or inCombat) then
         mainFrame:Show()
     end
@@ -2271,9 +2408,12 @@ end
 ------------------------------------------------------------
 -- Config panel
 ------------------------------------------------------------
--- Forward declarations: ShowStatsWindow is defined later
+-- Forward declarations: ShowStatsWindow / ShowScoreWindow are defined later
 -- in the file but referenced here (CreateConfigPanel / SetupSlash).
 local ShowStatsWindow
+local ShowScoreWindow
+local ToggleCCTracker
+local ShowCCConfig
 
 -- Compatibility helper: create a labeled slider without deprecated templates.
 -- Layout:   [Text centered above]
@@ -2346,6 +2486,24 @@ end
 ------------------------------------------------------------
 -- Frame position save/restore (defined early for CreateConfigPanel)
 ------------------------------------------------------------
+-- Save/restore helpers for secondary windows (config, stats, changelog, score, ccConfig)
+local function SaveWinPos(keyX, keyY, frame)
+    if frame and db then
+        db[keyX] = frame:GetLeft()
+        db[keyY] = frame:GetTop()
+    end
+end
+
+local function RestoreWinPos(keyX, keyY, frame, defaultFn)
+    local x, y = db and db[keyX], db and db[keyY]
+    if x and y then
+        frame:ClearAllPoints()
+        frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
+    else
+        defaultFn()
+    end
+end
+
 local function LoxxSaveFramePosition(frame)
     if not frame then return false end
     local x, y = frame:GetLeft(), frame:GetTop()
@@ -2374,7 +2532,7 @@ local function LoxxRestoreFramePosition(frame)
         frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
     else
         frame:ClearAllPoints()
-        frame:SetPoint("CENTER", UIParent, "CENTER", 0, -150)
+        frame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 20, 220)
     end
 end
 
@@ -2395,13 +2553,23 @@ local function ShowChangelogWindow()
     local CW, CH = 420, 500
     changelogFrame = CreateFrame("Frame", "LoxxChangelogFrame", UIParent, "BasicFrameTemplate")
     changelogFrame:SetSize(CW, CH)
-    changelogFrame:SetPoint("TOPLEFT", configFrame, "TOPRIGHT", 4, 0)
+    RestoreWinPos("changelogFrameX", "changelogFrameY", changelogFrame, function()
+        changelogFrame:SetPoint("TOPLEFT", configFrame, "TOPRIGHT", 4, 0)
+    end)
     changelogFrame:SetFrameStrata("DIALOG")
     changelogFrame:SetMovable(true)
     changelogFrame:EnableMouse(true)
     changelogFrame:RegisterForDrag("LeftButton")
     changelogFrame:SetScript("OnDragStart", changelogFrame.StartMoving)
-    changelogFrame:SetScript("OnDragStop", changelogFrame.StopMovingOrSizing)
+    changelogFrame:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        SaveWinPos("changelogFrameX", "changelogFrameY", self)
+        -- Score follows below Changelog
+        if scoreFrame and scoreFrame:IsShown() then
+            scoreFrame:ClearAllPoints()
+            scoreFrame:SetPoint("TOPLEFT", self, "BOTTOMLEFT", 0, -4)
+        end
+    end)
     changelogFrame:SetClampedToScreen(true)
     if changelogFrame.TitleText then changelogFrame.TitleText:SetText("") end
 
@@ -2473,24 +2641,83 @@ local function CreateConfigPanel()
 
     configFrame = CreateFrame("Frame", "LoxxConfigFrame", UIParent, "BasicFrameTemplate")
     configFrame:SetSize(PW + 80, PH + 120)
-    configFrame:SetPoint("CENTER")
+    RestoreWinPos("configFrameX", "configFrameY", configFrame, function()
+        configFrame:SetPoint("CENTER")
+    end)
     configFrame:SetFrameStrata("DIALOG")
     configFrame:SetMovable(true)
     configFrame:EnableMouse(true)
     configFrame:RegisterForDrag("LeftButton")
     configFrame:SetScript("OnDragStart", configFrame.StartMoving)
-    configFrame:SetScript("OnDragStop", configFrame.StopMovingOrSizing)
+    configFrame:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        -- Stats: left of config
+        if statsFrame and statsFrame:IsShown() then
+            statsFrame:ClearAllPoints()
+            statsFrame:SetPoint("TOPRIGHT", configFrame, "TOPLEFT", -4, 0)
+        end
+        -- Changelog: right of config
+        if changelogFrame and changelogFrame:IsShown() then
+            changelogFrame:ClearAllPoints()
+            changelogFrame:SetPoint("TOPLEFT", configFrame, "TOPRIGHT", 4, 0)
+        end
+        -- Score: below changelog (or right of config if changelog closed)
+        if scoreFrame and scoreFrame:IsShown() then
+            scoreFrame:ClearAllPoints()
+            if changelogFrame and changelogFrame:IsShown() then
+                scoreFrame:SetPoint("TOPLEFT", changelogFrame, "BOTTOMLEFT", 0, -4)
+            else
+                scoreFrame:SetPoint("TOPLEFT", configFrame, "TOPRIGHT", 4, 0)
+            end
+        end
+        -- CC Config: below stats (or left of config if stats closed)
+        if ccConfigFrame and ccConfigFrame:IsShown() then
+            ccConfigFrame:ClearAllPoints()
+            if statsFrame and statsFrame:IsShown() then
+                ccConfigFrame:SetPoint("TOPLEFT", statsFrame, "BOTTOMLEFT", 0, -4)
+            else
+                ccConfigFrame:SetPoint("TOPRIGHT", configFrame, "TOPLEFT", -4, 0)
+            end
+        end
+        -- CC Tracker: reposition if visible
+        if ccFrame and ccFrame:IsShown() then
+            ccFrame:ClearAllPoints()
+            ccFrame:SetPoint("TOPLEFT", configFrame, "TOPRIGHT", 4, -30)
+        end
+        -- Save config position
+        SaveWinPos("configFrameX", "configFrameY", configFrame)
+    end)
     configFrame:SetClampedToScreen(true)
     if configFrame.TitleText then configFrame.TitleText:SetText("") end
     -- Escape key closes Settings (and triggers OnHide → closes child windows)
     table.insert(UISpecialFrames, "LoxxConfigFrame")
-    -- Close child windows when Settings is closed
+    -- Close child windows when Settings is closed (Escape or close button)
     configFrame:SetScript("OnHide", function()
         if statsFrame then
             statsFrame:Hide(); statsFrame = nil
         end
         if changelogFrame then
             changelogFrame:Hide(); changelogFrame = nil
+        end
+        if scoreFrame then
+            scoreFrame:Hide(); scoreFrame = nil
+        end
+        if ccConfigFrame then
+            ccConfigFrame:Hide()
+        end
+        -- CC Tracker: hide visually when config closes (db.showCCTracker unchanged)
+        if ccFrame then
+            ccFrame:Hide()
+        end
+    end)
+    -- When config reopens: restore CC Tracker if it was active
+    configFrame:SetScript("OnShow", function()
+        if db and db.showCCTracker then
+            if ccFrame then
+                ccFrame:Show()
+            else
+                CreateCCFrame()
+            end
         end
     end)
 
@@ -2843,10 +3070,72 @@ local function CreateConfigPanel()
     SectionLabelR(L["SEC_UI"], yR)
     yR = yR - 30
     CreateCheckbox(configFrame, L["CB_TOOLTIP"], R_CBX1, yR, "showTooltip")
+    yR = yR - 28
+    CreateCheckbox(configFrame, L["CB_ALERT_CAST"], R_CBX1, yR, "alertOnCast")
+
+    -- History limit dropdown
+    yR = yR - 48
+    local HIST_PRESETS = {
+        { label = "10 runs",  val = 10  },
+        { label = "25 runs",  val = 25  },
+        { label = "50 runs",  val = 50  },
+        { label = "100 runs", val = 100 },
+        { label = "200 runs", val = 200 },
+    }
+    local function GetHistIndex()
+        local v = db.maxRunHistory or 50
+        for i, p in ipairs(HIST_PRESETS) do if p.val == v then return i end end
+        return 3  -- default 50 runs
+    end
+    local _, RefreshHistLabel = CreatePresetDropdownControl(
+        configFrame,
+        "LOXX_HistDropDown",
+        R_CBX1, yR, PRESET_DROPDOWN_W,
+        HIST_PRESETS,
+        GetHistIndex,
+        function(i)
+            local chosen = HIST_PRESETS[i]
+            if chosen then db.maxRunHistory = chosen.val end
+        end,
+        L["DD_MAX_HISTORY"]
+    )
+    RefreshHistLabel()
+
+    local histTip = configFrame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    histTip:SetPoint("TOPLEFT", R_CBX1, yR - 28)
+    histTip:SetText(L["DD_MAX_HISTORY_TIP"])
+    histTip:SetTextColor(0.55, 0.55, 0.55, 1)
+
+    -- CC Tracker toggle
+    yR = yR - 80
+    SectionLabelR("CC TRACKER", yR)
+    yR = yR - 30
+    local ccCb = CreateFrame("CheckButton", nil, configFrame, "UICheckButtonTemplate")
+    ccCb:SetPoint("TOPLEFT", R_CBX1, yR)
+    local ccCbLabel = ccCb.text or ccCb.Text
+    if ccCbLabel then ccCbLabel:SetText(L["CB_SHOW_CC"]) end
+    ccCb:SetChecked(db.showCCTracker)
+    ccCb:SetScript("OnClick", function(self)
+        db.showCCTracker = self:GetChecked() and true or false
+        if db.showCCTracker then
+            if ToggleCCTracker then ToggleCCTracker(true) end
+        else
+            if ccFrame then ccFrame:Hide() end
+        end
+    end)
+
+    yR = yR - 32
+    local ccConfigBtn = CreateFrame("Button", nil, configFrame, "UIPanelButtonTemplate")
+    ccConfigBtn:SetSize(140, 22)
+    ccConfigBtn:SetPoint("TOPLEFT", R_CBX1, yR)
+    ccConfigBtn:SetText("Configure CC")
+    ccConfigBtn:SetScript("OnClick", function()
+        if ShowCCConfig then ShowCCConfig() end
+    end)
 
     -- ── FOOTER ───────────────────────────────────────────────────
     local footerBand = CreateFrame("Frame", nil, configFrame)
-    footerBand:SetHeight(78)
+    footerBand:SetHeight(108)
     footerBand:SetPoint("BOTTOMLEFT", configFrame, "BOTTOMLEFT", 0, 0)
     footerBand:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", 0, 0)
     footerBand:SetFrameLevel(configFrame:GetFrameLevel() + 2)
@@ -2920,8 +3209,26 @@ local function CreateConfigPanel()
     commandsBtn:SetPoint("RIGHT", statsBtn, "LEFT", -10, 0)
     commandsBtn:SetText(L["BTN_COMMANDS"])
     commandsBtn:SetScript("OnClick", function()
-        print("|cFF00DDDD[LOXX]|r /loxx")
+        local p = "|cFF00DDDD[LOXX]|r "
+        print(p .. "|cFFFFFF00/loxx|r — toggle tracker")
+        print(p .. "|cFFFFFF00/loxx score|r — all-time kick score")
+        print(p .. "|cFFFFFF00/loxx changelog|r — show changelog")
+        print(p .. "|cFFFFFF00/loxx runs|r — show run history")
+        print(p .. "|cFFFFFF00/loxx csv|r — export stats as CSV")
+        print(p .. "|cFFFFFF00/loxx cc|r — toggle CC Tracker")
+        print(p .. "|cFFFFFF00/loxx reset|r — reset current run")
+        print(p .. "|cFFFFFF00/loxx config|r — open settings")
     end)
+
+    -- Score button: below Changelog button
+    local scoreBtn = CreateFrame("Button", nil, footerBand, "UIPanelButtonTemplate")
+    scoreBtn:SetSize(110, 24)
+    scoreBtn:SetPoint("TOP", changelogBtn, "BOTTOM", 0, -6)
+    scoreBtn:SetText("Score")
+    if scoreBtn.GetFontString and scoreBtn:GetFontString() then
+        scoreBtn:GetFontString():SetTextColor(1, 0.82, 0)
+    end
+    scoreBtn:SetScript("OnClick", function() if ShowScoreWindow then ShowScoreWindow() end end)
 
     local footerMsg = footerBand:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     footerMsg:SetPoint("BOTTOMLEFT", footerBand, "BOTTOMLEFT", 14, 10)
@@ -2956,6 +3263,11 @@ local function CreateUI()
     mainFrame:SetScript("OnDragStop", function(self)
         self:StopMovingOrSizing()
         LoxxSaveFramePosition(self)
+        -- CC Tracker follows mainFrame only if player hasn't set a custom position
+        if ccFrame and ccFrame:IsShown() and not (db.ccFrameX and db.ccFrameY) then
+            ccFrame:ClearAllPoints()
+            ccFrame:SetPoint("TOPLEFT", self, "TOPRIGHT", 4, 0)
+        end
     end)
     mainFrame:SetScript("OnMouseDown", function(self, btn)
         if btn == "RightButton" then CreateConfigPanel() end
@@ -3045,6 +3357,38 @@ local function CreateUI()
     end)
     DetectElvUI()
     RebuildBars()
+end
+
+------------------------------------------------------------
+-- All-time stats aggregator (used by /loxx csv and /loxx score)
+------------------------------------------------------------
+local function ComputeAllStats()
+    local data = {}
+    local allRuns = {}
+    if loxxCurrentRun and next(loxxCurrentRun.players) then
+        allRuns[#allRuns + 1] = loxxCurrentRun
+    end
+    for _, run in ipairs(LOXXSavedVars.loxxRunHistory or {}) do
+        allRuns[#allRuns + 1] = run
+    end
+    for _, run in ipairs(allRuns) do
+        for name, kicks in pairs(run.players or {}) do
+            data[name] = data[name] or { kicks = 0, misses = 0 }
+            data[name].kicks = data[name].kicks + kicks
+        end
+        for name, misses in pairs(run.missedKicks or {}) do
+            data[name] = data[name] or { kicks = 0, misses = 0 }
+            data[name].misses = data[name].misses + misses
+        end
+    end
+    local t = {}
+    for name, d in pairs(data) do
+        local total = d.kicks + d.misses
+        local ratio = total > 0 and math.floor(d.kicks / total * 100 + 0.5) or 100
+        t[#t + 1] = { name = name, kicks = d.kicks, misses = d.misses, ratio = ratio }
+    end
+    table.sort(t, function(a, b) return a.kicks > b.kicks end)
+    return t
 end
 
 ------------------------------------------------------------
@@ -3402,6 +3746,27 @@ local function SetupSlash()
                     print("  " .. name .. ": " .. kicks .. " kick" .. (kicks ~= 1 and "s" or "") .. mStr)
                 end
             end
+        elseif cmd == "cc" then
+            if ToggleCCTracker then ToggleCCTracker() end
+        elseif cmd == "cc config" then
+            if ShowCCConfig then ShowCCConfig() end
+        elseif cmd == "reset" then
+            StartNewRun()
+            displayDirty = true
+            print("|cFF00DDDD[LOXX]|r Run reset.")
+        elseif cmd == "score" then
+            ShowScoreWindow()
+        elseif cmd == "csv" then
+            local stats = ComputeAllStats()
+            if #stats == 0 then
+                print("|cFF00DDDD[LOXX]|r No data yet.")
+            else
+                print("|cFF00DDDD[LOXX]|r All-time stats (CSV):")
+                print("Name,Kicks,Misses,Ratio%")
+                for _, e in ipairs(stats) do
+                    print(e.name .. "," .. e.kicks .. "," .. e.misses .. "," .. e.ratio)
+                end
+            end
         elseif cmd == "help" then
             print(
                 "|cFF00DDDD[LOXX]|r /loxx")
@@ -3428,12 +3793,13 @@ local function ArchiveCurrentRun()
         return
     end
     table.insert(LOXXSavedVars.loxxRunHistory, 1, loxxCurrentRun)
-    while #LOXXSavedVars.loxxRunHistory > 50 do
+    local maxH = (db and db.maxRunHistory) or 50
+    while #LOXXSavedVars.loxxRunHistory > maxH do
         table.remove(LOXXSavedVars.loxxRunHistory)
     end
 end
 
-local function StartNewRun()
+StartNewRun = function()
     ArchiveCurrentRun()
     local name, instanceType, _, _, _, _, _, instanceID = GetInstanceInfo()
     local keyLevel = 0
@@ -3525,16 +3891,26 @@ ShowStatsWindow = function(charFilterOverride)
     -- ── Frame ────────────────────────────────────────────────────
     local sf = CreateFrame("Frame", "LOXXStatsFrame", UIParent, "BasicFrameTemplate")
     sf:SetSize(SW, SH)
-    if configFrame then
-        sf:SetPoint("TOPRIGHT", configFrame, "TOPLEFT", -4, 0)
-    else
-        sf:SetPoint("CENTER")
-    end
+    RestoreWinPos("statsFrameX", "statsFrameY", sf, function()
+        if configFrame then
+            sf:SetPoint("TOPRIGHT", configFrame, "TOPLEFT", -4, 0)
+        else
+            sf:SetPoint("CENTER")
+        end
+    end)
     sf:SetMovable(true)
     sf:EnableMouse(true)
     sf:RegisterForDrag("LeftButton")
     sf:SetScript("OnDragStart", sf.StartMoving)
-    sf:SetScript("OnDragStop", sf.StopMovingOrSizing)
+    sf:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        SaveWinPos("statsFrameX", "statsFrameY", self)
+        -- CC Config follows below Stats
+        if ccConfigFrame and ccConfigFrame:IsShown() then
+            ccConfigFrame:ClearAllPoints()
+            ccConfigFrame:SetPoint("TOPLEFT", self, "BOTTOMLEFT", 0, -4)
+        end
+    end)
     sf:SetClampedToScreen(true)
     sf:SetFrameStrata("DIALOG")
     if sf.TitleText then sf.TitleText:SetText("") end
@@ -3757,6 +4133,150 @@ ShowStatsWindow = function(charFilterOverride)
     end
 
     content:SetHeight(math.max(120, math.abs(y) + 20))
+    sf:Show()
+end
+
+------------------------------------------------------------
+-- Score window: all-time kick/miss ratio per player
+------------------------------------------------------------
+ShowScoreWindow = function()
+    if scoreFrame and scoreFrame:IsShown() then
+        scoreFrame:Hide(); scoreFrame = nil; return
+    end
+    if scoreFrame then scoreFrame:Hide(); scoreFrame = nil end
+
+    local stats = ComputeAllStats()
+    local SW, SH = 340, math.max(180, 80 + #stats * 44 + 50)
+    local FLAT_TEX = "Interface\\Buttons\\WHITE8X8"
+
+    local sf = CreateFrame("Frame", "LoxxScoreFrame", UIParent, "BasicFrameTemplate")
+    sf:SetSize(SW, SH)
+    RestoreWinPos("scoreFrameX", "scoreFrameY", sf, function()
+        if changelogFrame and changelogFrame:IsShown() then
+            sf:SetPoint("TOPLEFT", changelogFrame, "BOTTOMLEFT", 0, -4)
+        elseif configFrame then
+            sf:SetPoint("TOPLEFT", configFrame, "TOPRIGHT", 4, 0)
+        else
+            sf:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -20, -200)
+        end
+    end)
+    sf:SetFrameStrata("DIALOG")
+    sf:SetMovable(true)
+    sf:EnableMouse(true)
+    sf:RegisterForDrag("LeftButton")
+    sf:SetScript("OnDragStart", sf.StartMoving)
+    sf:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        SaveWinPos("scoreFrameX", "scoreFrameY", self)
+    end)
+    sf:SetScript("OnKeyDown", function(self, key)
+        if key == "ESCAPE" then self:Hide(); scoreFrame = nil end
+    end)
+    sf:SetPropagateKeyboardInput(true)
+    scoreFrame = sf
+
+    -- Background
+    local bg = sf:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetTexture(FLAT_TEX)
+    bg:SetVertexColor(0.08, 0.06, 0.03, 0.97)
+
+    -- Title
+    local title = sf:CreateFontString(nil, "OVERLAY")
+    title:SetFont(FONT_FACE, 16, FONT_FLAGS)
+    title:SetPoint("TOP", sf, "TOP", 0, -28)
+    title:SetText("|cFFFFD100" .. L["SCORE_TITLE"] .. "|r")
+
+    local sep = sf:CreateTexture(nil, "ARTWORK")
+    sep:SetTexture(FLAT_TEX)
+    sep:SetHeight(1)
+    sep:SetVertexColor(0.87, 0.73, 0.37, 0.5)
+    sep:SetPoint("TOPLEFT", sf, "TOPLEFT", 10, -50)
+    sep:SetPoint("TOPRIGHT", sf, "TOPRIGHT", -10, -50)
+
+    if #stats == 0 then
+        local noData = sf:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+        noData:SetPoint("CENTER", sf, "CENTER", 0, 0)
+        noData:SetText(L["STATS_EMPTY"])
+        sf:Show()
+        return
+    end
+
+    -- Rows
+    local ROW_H = 38
+    local PAD   = 14
+    local y     = -60
+
+    for _, e in ipairs(stats) do
+        local row = CreateFrame("Frame", nil, sf)
+        row:SetPoint("TOPLEFT", sf, "TOPLEFT", PAD, y)
+        row:SetPoint("TOPRIGHT", sf, "TOPRIGHT", -PAD, y)
+        row:SetHeight(ROW_H)
+
+        -- Row background
+        local rowBg = row:CreateTexture(nil, "BACKGROUND")
+        rowBg:SetAllPoints()
+        rowBg:SetTexture(FLAT_TEX)
+        rowBg:SetVertexColor(0.12, 0.10, 0.07, 0.6)
+
+        -- Player name (with class color if available)
+        local nameLabel = row:CreateFontString(nil, "OVERLAY")
+        nameLabel:SetFont(FONT_FACE, 12, FONT_FLAGS)
+        local col = (partyAddonUsers[e.name] and CLASS_COLORS[partyAddonUsers[e.name].class])
+                    or (e.name == myName and myClass and CLASS_COLORS[myClass])
+                    or {1, 0.82, 0}
+        nameLabel:SetTextColor(col[1], col[2], col[3])
+        nameLabel:SetPoint("TOPLEFT", row, "TOPLEFT", 4, -4)
+        nameLabel:SetText(e.name)
+
+        -- Stats text
+        local statsLabel = row:CreateFontString(nil, "OVERLAY")
+        statsLabel:SetFont(FONT_FACE, 10, FONT_FLAGS)
+        statsLabel:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 4, 4)
+        local missStr = e.misses > 0 and (" |cFFFF4444" .. e.misses .. " missed|r") or ""
+        statsLabel:SetText(e.kicks .. " kicks" .. missStr)
+
+        -- Ratio bar background
+        local barBg = row:CreateTexture(nil, "BACKGROUND", nil, 1)
+        barBg:SetTexture(FLAT_TEX)
+        barBg:SetVertexColor(0.25, 0.0, 0.0, 0.8)
+        barBg:SetPoint("TOPRIGHT", row, "TOPRIGHT", -2, -4)
+        barBg:SetSize(80, 14)
+
+        -- Ratio bar fill
+        local barFill = row:CreateTexture(nil, "ARTWORK")
+        barFill:SetTexture(FLAT_TEX)
+        local r2 = e.ratio / 100
+        local gr = r2 >= 0.8 and 0.8 or (r2 >= 0.5 and 0.6 or 0.3)
+        barFill:SetVertexColor(0.1, gr, 0.1, 0.9)
+        barFill:SetPoint("TOPLEFT", barBg, "TOPLEFT", 0, 0)
+        barFill:SetHeight(14)
+        barFill:SetWidth(math.max(2, 80 * r2))
+
+        -- Ratio text
+        local ratioLabel = row:CreateFontString(nil, "OVERLAY")
+        ratioLabel:SetFont(FONT_FACE, 10, "OUTLINE")
+        ratioLabel:SetPoint("CENTER", barBg, "CENTER", 0, 0)
+        ratioLabel:SetText(e.ratio .. "%")
+        ratioLabel:SetTextColor(1, 1, 1, 1)
+
+        y = y - ROW_H - 4
+    end
+
+    -- Clear button
+    local clearBtn = CreateFrame("Button", nil, sf, "UIPanelButtonTemplate")
+    clearBtn:SetSize(80, 22)
+    clearBtn:SetPoint("BOTTOM", sf, "BOTTOM", 0, 8)
+    clearBtn:SetText(L["BTN_CLEAR"] or "Clear")
+    clearBtn:SetScript("OnClick", function()
+        LOXXSavedVars.loxxRunHistory = {}
+        loxxCurrentRun = nil
+        sf:Hide()
+        scoreFrame = nil
+        print("|cFF00DDDD[LOXX]|r All-time score cleared.")
+    end)
+
+    sf:SetHeight(math.abs(y) + 50)
     sf:Show()
 end
 
@@ -4052,7 +4572,41 @@ local function Initialize()
     -- AnnounceState is self-throttled and no-ops when not on CD or not in a group.
     C_Timer.NewTicker(5, AnnounceState)
 
-    C_Timer.After(2, AnnounceJoin)
+    -- Player death detection: reset CD to 0 when a party member dies so they
+    -- no longer show as "on cooldown" while dead.  Resurrect clears the flag.
+    -- partyDeadFlags is module-level so RenderPartyBar can read it.
+    C_Timer.NewTicker(0.5, function()
+        if not IsInGroup() then return end
+        for i = 1, 4 do
+            local unit = "party" .. i
+            if UnitExists(unit) then
+                local name = UnitName(unit)
+                if name and partyAddonUsers[name] then
+                    local isDead = UnitIsDeadOrGhost(unit)
+                    if isDead and not partyDeadFlags[name] then
+                        partyDeadFlags[name] = true
+                        partyAddonUsers[name].cdEnd = 0
+                        displayDirty = true
+                        DLog("DEATH", name .. " died — CD reset to 0")
+                    elseif not isDead and partyDeadFlags[name] then
+                        partyDeadFlags[name] = nil
+                        displayDirty = true
+                        DLog("DEATH", name .. " alive again")
+                    end
+                end
+            end
+        end
+    end)
+
+    C_Timer.After(2, function()
+        if mySpellID then
+            AnnounceJoin()
+        elseif IsInGroup() then
+            -- Non-kicker (healer): announce presence so kickers send their JOIN
+            SendLOXX("HELLO")
+            DLog("COMM", "HELLO sent (no kick — healer mode)")
+        end
+    end)
     print("|cFF00DDDD[Loxx Interrupt Tracker]|r v" .. LOXX_VERSION .. " | /loxx")
 end
 
@@ -4090,10 +4644,27 @@ playerCastFrame:SetScript("OnEvent", function(_, _, unit, castGUID, spellID)
         local isInterrupt = ALL_INTERRUPTS[spellID] and "YES" or "no"
         local isExtra = myExtraKicks[spellID] and "YES" or "no"
         DLog("SELF", "spellID=" .. tostring(spellID) .. " interrupt=" .. isInterrupt .. " extra=" .. isExtra)
-        -- Detect self CC casts and log them silently
+        -- Detect self CC casts: sync to party and update self CC entry
         local ccData = CC_SPELLS[spellID]
         if ccData then
             DLog("CC_SELF", ccData.name .. " (" .. ccData.dr .. ") spellID=" .. tostring(spellID))
+            -- Look up CD from CC_CLASS_PRIMARY (primary spell) or use 2s for no-CD spells
+            local ccCd = 2
+            if myClass and CC_CLASS_PRIMARY[myClass] and CC_CLASS_PRIMARY[myClass].spellID == spellID then
+                ccCd = CC_CLASS_PRIMARY[myClass].cd > 0 and CC_CLASS_PRIMARY[myClass].cd or 2
+            end
+            -- Update own CC entry
+            if myName and ccAddonUsers[myName] then
+                local newEnd = GetTime() + ccCd
+                if newEnd > (ccAddonUsers[myName].cdEnd or 0) then
+                    ccAddonUsers[myName].cdEnd    = newEnd
+                    ccAddonUsers[myName].spellID  = spellID
+                    ccAddonUsers[myName].spellName = ccData.name
+                    ccDirty = true
+                end
+            end
+            -- Broadcast to party
+            SendLOXX("CCCAST:" .. tostring(spellID) .. ":" .. tostring(ccCd))
         end
         if spyMode then
             print("|cFF00DDDD[SPY]|r PLAYER cast spellID=" ..
@@ -4250,8 +4821,8 @@ local function OnMobInterrupted(unit)
         -- and cancel any pending missed-kick timers to prevent false attribution.
         if selfKickTime > 0 and (now - selfKickTime) < 0.5 then
             selfKickTime = 0
-            local guid = UnitGUID(unit)
-            if guid then CancelMissForGUID(guid) end
+            local ok_g, guid = pcall(UnitGUID, unit)
+            if ok_g and guid then CancelMissForGUID(guid) end
         end
 
         -- Safety-net time-based dedup (catches edge cases where bestName changes)
@@ -4344,28 +4915,34 @@ local function OnMobInterrupted(unit)
             end
         end
     end
-end
 
--- Channel start: record expected end time so CHANNEL_STOP can distinguish
--- interrupted channels from naturally-completed ones.
-local function OnMobChannelStart(unit)
-    local ok, _, _, _, startTimeMs, endTimeMs = pcall(GetUnitChannelInfo, unit)
-    if ok and endTimeMs and endTimeMs > 0 then
-        activeChannels[unit] = endTimeMs / 1000
+    -- Record school lock: show "LOCKED: SpellName (Xs)" in the alert band for 6s.
+    -- Use the last detected interruptible cast name for display.
+    if lastMobCastName then
+        mobSchoolLock.name    = lastMobCastName
+        mobSchoolLock.endTime = GetTime() + 6
+        currentMobCasting     = false  -- cast was interrupted
+        DLog("LOCK", "school lock recorded for: " .. lastMobCastName)
     end
 end
 
--- Channel stop: only treat as an interrupt if the channel was cut short.
--- Returns true if OnMobInterrupted was called (kick may have been attributed).
+-- Channel start: record start time (we cannot use UnitChannelInfo timestamps —
+-- they are secret/tainted numbers in Midnight 12.0 and cannot be compared).
+-- We store GetTime() so OnMobChannelStop can estimate if the channel was cut short.
+local CHANNEL_MIN_DURATION = 1.0  -- channels shorter than this are considered interrupted
+local function OnMobChannelStart(unit)
+    activeChannels[unit] = GetTime()
+end
+
+-- Channel stop: treat as an interrupt if the channel lasted less than the minimum
+-- expected duration (i.e. it was cut short rather than completed naturally).
 local function OnMobChannelStop(unit)
-    local expectedEnd = activeChannels[unit]
+    local startTime = activeChannels[unit]
     activeChannels[unit] = nil
-    if expectedEnd and (GetTime() < expectedEnd - 0.3) then
-        -- Channel cut short — could be a kick or a CC (stun, fear, poly, etc.)
-        -- Call the correlation engine; if no kicker is found it will log NO MATCH.
-        -- We log a CC entry here so the dungeon log captures it regardless.
+    if startTime and (GetTime() - startTime) < CHANNEL_MIN_DURATION then
+        -- Channel cut very short — likely a kick or CC.
         DLog("CC", "channel cut short on " .. tostring(unit) ..
-            " (rem=" .. string.format("%.1f", expectedEnd - GetTime()) .. "s)")
+            " (elapsed=" .. string.format("%.1f", GetTime() - startTime) .. "s)")
         OnMobInterrupted(unit)
     end
     -- else: natural end — ignore entirely
@@ -4437,6 +5014,61 @@ for i = 1, 40 do
         end
     end)
 end
+
+-- Mob cast alert: flash a message and play a sound when an interruptible cast starts
+-- on target, focus, or boss frames.  Toggled by db.alertOnCast.
+local MOB_CAST_ALERT_UNITS = { "target", "focus", "boss1", "boss2", "boss3", "boss4", "boss5" }
+local lastAlertTime = 0  -- throttle: no more than one alert per 0.5s
+local mobCastAlertFrame = CreateFrame("Frame")
+for _, alertUnit in ipairs(MOB_CAST_ALERT_UNITS) do
+    mobCastAlertFrame:RegisterUnitEvent("UNIT_SPELLCAST_START",       alertUnit)
+    mobCastAlertFrame:RegisterUnitEvent("UNIT_SPELLCAST_STOP",        alertUnit)
+    mobCastAlertFrame:RegisterUnitEvent("UNIT_SPELLCAST_FAILED",      alertUnit)
+    mobCastAlertFrame:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", alertUnit)
+end
+mobCastAlertFrame:SetScript("OnEvent", function(_, event, unit, _castGUID, spellID)
+    if not unit then return end
+
+    -- Track UNIT_SPELLCAST_STOP / INTERRUPTIBLE_CHANGED to clear currentMobCasting
+    if event == "UNIT_SPELLCAST_STOP" or event == "UNIT_SPELLCAST_FAILED"
+    or event == "UNIT_SPELLCAST_INTERRUPTED" then
+        currentMobCasting = false
+        return
+    end
+
+    -- Ignore player and pet casts (only alert on mob casts)
+    local okP, isPlayer = pcall(UnitIsPlayer, unit)
+    if okP and isPlayer then return end
+    local okC, isControlled = pcall(UnitPlayerControlled, unit)
+    if okC and isControlled then return end
+
+    -- Check that the cast is interruptible.
+    -- UnitCastingInfo returns: name, text, texture, startMS, endMS, isTradeSkill, castID, notInterruptible, spellID
+    local okCast, spellName, _, _, _, _, _, _, notInterruptible = pcall(UnitCastingInfo, unit)
+    if not okCast or not spellName then return end
+    if notInterruptible then
+        currentMobCasting = false
+        return
+    end
+
+    -- Cast is interruptible: update shared state
+    lastMobCastName   = spellName
+    currentMobCasting = true
+
+    -- Alert only if option is enabled
+    if not db or not db.alertOnCast then return end
+
+    local now = GetTime()
+    if (now - lastAlertTime) < 0.5 then return end
+    lastAlertTime = now
+
+    local soundID = (db.soundID and db.soundID ~= 0) and db.soundID or 8960
+    PlaySound(soundID, "Master")
+    if UIErrorsFrame then
+        UIErrorsFrame:AddMessage("|cFFFF4444INTERRUPT!|r  " .. (spellName or ""), 1, 0.3, 0.3, 1)
+    end
+    DLog("ALERT", "interruptible cast started: " .. tostring(spellName) .. " on " .. tostring(unit))
+end)
 
 -- Party event frames: OnValueChanged spell detection + time correlation
 RegisterPartyWatchers = function()
@@ -4676,6 +5308,7 @@ ef:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
         CheckZoneVisibility()
         if UpdateMaxBars() then RebuildBars() end
         C_Timer.After(1, QueuePartyInspect)
+        if PopulateCCUsers then C_Timer.After(0.5, PopulateCCUsers) end
 
     elseif event == "PLAYER_ENTERING_WORLD" then
         inCombat = InCombatLockdown()
@@ -4693,10 +5326,15 @@ ef:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
             end
         end
         C_Timer.After(1, AutoRegisterPartyByClass)
+        if PopulateCCUsers then C_Timer.After(1.5, PopulateCCUsers) end
         C_Timer.After(2, QueuePartyInspect)
         C_Timer.After(3, function()
             FindMyInterrupt()
-            AnnounceJoin()
+            if mySpellID then
+                AnnounceJoin()
+            elseif IsInGroup() then
+                SendLOXX("HELLO")
+            end
             AutoRegisterPartyByClass()
         end)
 
@@ -4737,5 +5375,401 @@ ef:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
     elseif event == "PLAYER_LOGOUT" then
         ArchiveCurrentRun()
         if mainFrame then LoxxSaveFramePosition(mainFrame) end
+    end
+end)
+
+------------------------------------------------------------
+-- CC TRACKER BLOCK
+-- Separate window tracking party CC cooldowns.
+-- Shares visual settings (width, alpha, fonts, textures) with the main tracker.
+-- Does NOT modify mainFrame, its bars, or the Settings panel layout.
+------------------------------------------------------------
+
+-- Populate ccAddonUsers from the current party roster.
+-- Preserves existing cdEnd values so live CDs are not lost on roster changes.
+PopulateCCUsers = function()
+    local seen = {}
+
+    -- Self
+    if myClass and myName then
+        seen[myName] = true
+        if not ccAddonUsers[myName] then
+            local cc = CC_CLASS_PRIMARY[myClass]
+            if cc then
+                ccAddonUsers[myName] = {
+                    class     = myClass,
+                    spellID   = cc.spellID,
+                    spellName = cc.name,
+                    baseCd    = cc.cd,
+                    cdEnd     = 0,
+                    icon      = C_Spell.GetSpellTexture(cc.spellID),
+                    isSelf    = true,
+                }
+            end
+        end
+    end
+
+    -- Party members (party1..4)
+    for i = 1, 4 do
+        local unit = "party" .. i
+        if UnitExists(unit) then
+            local name = UnitName(unit)
+            local _, cls = UnitClass(unit)
+            if name and cls then
+                seen[name] = true
+                if not ccAddonUsers[name] then
+                    local cc = CC_CLASS_PRIMARY[cls]
+                    if cc then
+                        ccAddonUsers[name] = {
+                            class     = cls,
+                            spellID   = cc.spellID,
+                            spellName = cc.name,
+                            baseCd    = cc.cd,
+                            cdEnd     = 0,
+                            icon      = (function() local ok,t = pcall(C_Spell.GetSpellTexture, cc.spellID); return ok and t or nil end)(),
+                        }
+                    end
+                end
+            end
+        end
+    end
+
+    -- Remove players who left the group
+    for name in pairs(ccAddonUsers) do
+        if not seen[name] then ccAddonUsers[name] = nil end
+    end
+    ccDirty = true
+end
+
+-- Build one CC bar frame attached to parent.
+local function BuildOneCCBar(parent)
+    local barW, barH, iconS, fontSize, cdFontSize, titleH, readyFontSz = GetBarLayout()
+    local f = CreateFrame("Frame", nil, parent)
+    f:SetSize(iconS + barW - 6, barH)
+
+    local ico = f:CreateTexture(nil, "ARTWORK")
+    ico:SetSize(iconS, barH)
+    ico:SetPoint("LEFT", 0, 0)
+    ico:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    f.icon = ico
+
+    local barBg = f:CreateTexture(nil, "BACKGROUND")
+    barBg:SetPoint("TOPLEFT", iconS, 0)
+    barBg:SetPoint("BOTTOMRIGHT", 0, 0)
+    barBg:SetTexture(BAR_TEXTURE)
+    barBg:SetVertexColor(0.08, 0.08, 0.08, 1)
+
+    local sb = CreateFrame("StatusBar", nil, f)
+    sb:SetPoint("TOPLEFT", iconS, 0)
+    sb:SetPoint("BOTTOMRIGHT", 0, 0)
+    sb:SetStatusBarTexture(BAR_TEXTURE)
+    sb:SetStatusBarColor(1, 1, 1, 0.85)
+    sb:SetMinMaxValues(0, 1)
+    sb:SetValue(0)
+    sb:SetFrameLevel(f:GetFrameLevel() + 1)
+    f.cdBar = sb
+
+    local content = CreateFrame("Frame", nil, f)
+    content:SetPoint("TOPLEFT", iconS, 0)
+    content:SetPoint("BOTTOMRIGHT", 0, 0)
+    content:SetFrameLevel(sb:GetFrameLevel() + 1)
+
+    local nm = content:CreateFontString(nil, "OVERLAY")
+    nm:SetFont(FONT_FACE, fontSize, FONT_FLAGS)
+    nm:SetTextColor(unpack(FONT_COLOR))
+    nm:SetPoint("LEFT", 6, 0)
+    nm:SetJustifyH("LEFT")
+    nm:SetWidth(barW - 50)
+    nm:SetWordWrap(false)
+    nm:SetShadowOffset(1, -1)
+    nm:SetShadowColor(0, 0, 0, 1)
+    f.nameText = nm
+
+    local ct = content:CreateFontString(nil, "OVERLAY")
+    ct:SetFont(FONT_FACE, cdFontSize, FONT_FLAGS)
+    ct:SetTextColor(unpack(FONT_COLOR))
+    ct:SetPoint("RIGHT", -6, 0)
+    ct:SetShadowOffset(1, -1)
+    ct:SetShadowColor(0, 0, 0, 1)
+    f.cdText    = ct
+    f.cdFontSz  = cdFontSize
+    f.readyFontSz = readyFontSz
+    f:Hide()
+    return f
+end
+
+-- Rebuild all CC bars (called when frame is created or layout changes).
+local function RebuildCCBars()
+    if not ccFrame then return end
+    for i = 1, MAX_BARS do
+        if ccBars[i] then ccBars[i]:Hide(); ccBars[i]:SetParent(nil); ccBars[i] = nil end
+    end
+    local _, barH, _, _, _, titleH = GetBarLayout()
+    local maxN = math.min(currentMaxBars, MAX_BARS)
+    local th   = db.showTitle and 20 or 0
+    for i = 1, maxN do
+        ccBars[i] = BuildOneCCBar(ccFrame)
+        ccBars[i]:SetPoint("TOPLEFT", ccFrame, "TOPLEFT", 3, -(th + (i - 1) * (barH + 1)))
+    end
+    ccDirty = true
+end
+
+-- Render one CC bar.
+local function RenderCCBar(bar, name, icon, col, spellName, baseCd, rem, isUnknown)
+    bar:Show()
+    bar.icon:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+    bar.nameText:SetText(name)
+    bar.nameText:SetTextColor(unpack(FONT_COLOR))
+    local maxVal = math.max(1, baseCd or 1)
+    bar.cdBar:SetMinMaxValues(0, maxVal)
+    if rem > 0.5 then
+        bar.cdBar:SetValue(rem)
+        bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
+        bar.cdText:SetFont(FONT_FACE, bar.cdFontSz, FONT_FLAGS)
+        bar.cdText:SetText(string.format("%.0f", rem))
+        bar.cdText:SetTextColor(unpack(FONT_COLOR))
+    else
+        bar.cdBar:SetMinMaxValues(0, 1); bar.cdBar:SetValue(1)
+        bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
+        bar.cdText:SetFont(FONT_FACE, bar.readyFontSz, FONT_FLAGS)
+        if isUnknown then
+            bar.cdText:SetText("|cFF888888?|r")
+        else
+            bar.cdText:SetText(db.showReady and L["READY"] or "")
+            bar.cdText:SetTextColor(unpack(FONT_READY_COLOR))
+        end
+    end
+end
+
+-- Tick: update CC bars.
+local function UpdateCCDisplay()
+    if not ccFrame or not ccFrame:IsShown() then return end
+    local _, barH = GetBarLayout()
+    local now = GetTime()
+
+    -- Build sorted entry list (ready first, then by shortest CD)
+    local entries = {}
+    for name, info in pairs(ccAddonUsers) do
+        -- Skip classes hidden via CC config
+        if not (db.ccHiddenClasses and db.ccHiddenClasses[info.class]) then
+            local rem = (info.cdEnd and info.cdEnd > now) and (info.cdEnd - now) or 0
+            entries[#entries + 1] = { name = name, info = info, rem = rem }
+        end
+    end
+    table.sort(entries, function(a, b)
+        if (a.rem <= 0) ~= (b.rem <= 0) then return a.rem <= 0 end
+        return a.rem < b.rem
+    end)
+
+    local barIdx = 1
+    for _, e in ipairs(entries) do
+        if barIdx > currentMaxBars then break end
+        local bar = ccBars[barIdx]
+        if not bar then break end
+        local col      = CLASS_COLORS[e.info.class] or { 1, 1, 1 }
+        local baseCd   = e.info.baseCd or 0
+        -- Players without addon: we never got a CCCAST → mark as unknown
+        local isUnknown = (not e.info.isSelf) and (e.info.cdEnd == 0) and (not e.info.hasAddon)
+        RenderCCBar(bar, e.name, e.info.icon, col, e.info.spellName or "?", baseCd, e.rem, isUnknown)
+        barIdx = barIdx + 1
+    end
+    for i = barIdx, MAX_BARS do if ccBars[i] then ccBars[i]:Hide() end end
+
+    -- Resize to fit visible bars
+    local visCount = barIdx - 1
+    if visCount > 0 then
+        local th = db.showTitle and 20 or 0
+        ccFrame:SetHeight(th + visCount * (barH + 1))
+    end
+end
+
+-- Create (or show) the CC Tracker window.
+CreateCCFrame = function()
+    if ccFrame then ccFrame:Show(); return end
+
+    local FLAT_TEX = "Interface\\Buttons\\WHITE8X8"
+    local fw = db.frameWidth
+
+    ccFrame = CreateFrame("Frame", "LoxxCCFrame", UIParent)
+    ccFrame:SetWidth(fw)
+    ccFrame:SetHeight(200)
+    ccFrame:SetAlpha(db.alpha)
+    ccFrame:SetFrameStrata("MEDIUM")
+    ccFrame:SetMovable(true)
+    ccFrame:EnableMouse(true)
+    ccFrame:RegisterForDrag("LeftButton")
+    ccFrame:SetScript("OnDragStart", function(self)
+        if not db.locked then self:StartMoving() end
+    end)
+    ccFrame:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        db.ccFrameX = self:GetLeft()
+        db.ccFrameY = self:GetTop()
+    end)
+    ccFrame:SetScript("OnHide", function()
+        -- db.showCCTracker is set by ToggleCCTracker only — not here
+        -- (prevents OnHide from persisting "off" when closed by configFrame)
+    end)
+
+    -- Background
+    local bg = ccFrame:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetTexture(FLAT_TEX)
+    bg:SetVertexColor(0.05, 0.05, 0.05, 0.85)
+
+    -- Title band
+    local titleBand = ccFrame:CreateTexture(nil, "BACKGROUND", nil, 1)
+    titleBand:SetTexture(FLAT_TEX)
+    titleBand:SetVertexColor(0.10, 0.08, 0.04, 0.97)
+    titleBand:SetPoint("TOPLEFT", ccFrame, "TOPLEFT", 0, 0)
+    titleBand:SetPoint("TOPRIGHT", ccFrame, "TOPRIGHT", 0, 0)
+    titleBand:SetHeight(20)
+    ccFrame.titleBand = titleBand
+
+    local titleStr = ccFrame:CreateFontString(nil, "OVERLAY")
+    titleStr:SetFont(FONT_FACE, 11, FONT_FLAGS)
+    titleStr:SetPoint("CENTER", titleBand, "CENTER", 0, 0)
+    titleStr:SetTextColor(1, 0.82, 0)
+    titleStr:SetText(L["CC_TITLE"])
+    titleStr:SetShadowOffset(1, -1)
+    titleStr:SetShadowColor(0, 0, 0, 1)
+    ccFrame.titleText = titleStr
+
+    if not db.showTitle then
+        titleBand:Hide(); titleStr:Hide()
+    end
+
+    -- Position: restore saved or default below mainFrame
+    -- Restore saved position, or default to right of main tracker
+    if db.ccFrameX and db.ccFrameY then
+        ccFrame:ClearAllPoints()
+        ccFrame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", db.ccFrameX, db.ccFrameY)
+    elseif mainFrame then
+        ccFrame:ClearAllPoints()
+        ccFrame:SetPoint("TOPLEFT", mainFrame, "TOPRIGHT", 4, 0)
+    else
+        ccFrame:SetPoint("CENTER")
+    end
+
+    RebuildCCBars()
+    PopulateCCUsers()
+
+    -- Start ticker
+    if not ccTicker then
+        ccTicker = C_Timer.NewTicker(0.1, UpdateCCDisplay)
+    end
+
+    ccFrame:Show()
+end
+
+-- Toggle CC Tracker from settings checkbox or /loxx cc
+ToggleCCTracker = function(forceShow)
+    if forceShow or not db.showCCTracker then
+        db.showCCTracker = true
+        CreateCCFrame()
+    else
+        db.showCCTracker = false
+        if ccFrame then ccFrame:Hide() end
+    end
+end
+
+-- CC Config window: choose which classes to show in the CC Tracker
+-- (ccConfigFrame is forward-declared at module level)
+ShowCCConfig = function()
+    if ccConfigFrame then
+        if ccConfigFrame:IsShown() then ccConfigFrame:Hide() else ccConfigFrame:Show() end
+        return
+    end
+
+    local FLAT_TEX = "Interface\\Buttons\\WHITE8X8"
+    local CC_CLASS_ORDER = {
+        "WARRIOR","ROGUE","DEATHKNIGHT","DEMONHUNTER",
+        "PALADIN","MONK","HUNTER","MAGE",
+        "SHAMAN","DRUID","WARLOCK","PRIEST","EVOKER",
+    }
+
+    local W = 280
+    local ROW = 28
+    local H = 60 + #CC_CLASS_ORDER * ROW + 20
+
+    ccConfigFrame = CreateFrame("Frame", "LoxxCCConfigFrame", UIParent, "BasicFrameTemplate")
+    ccConfigFrame:SetSize(W, H)
+    ccConfigFrame:SetFrameStrata("DIALOG")
+    ccConfigFrame:SetMovable(true)
+    ccConfigFrame:EnableMouse(true)
+    ccConfigFrame:RegisterForDrag("LeftButton")
+    ccConfigFrame:SetScript("OnDragStart", ccConfigFrame.StartMoving)
+    ccConfigFrame:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        SaveWinPos("ccConfigFrameX", "ccConfigFrameY", self)
+    end)
+    ccConfigFrame:SetClampedToScreen(true)
+    if ccConfigFrame.TitleText then ccConfigFrame.TitleText:SetText("") end
+
+    RestoreWinPos("ccConfigFrameX", "ccConfigFrameY", ccConfigFrame, function()
+        if statsFrame and statsFrame:IsShown() then
+            ccConfigFrame:SetPoint("TOPLEFT", statsFrame, "BOTTOMLEFT", 0, -4)
+        elseif configFrame then
+            ccConfigFrame:SetPoint("TOPRIGHT", configFrame, "TOPLEFT", -4, 0)
+        else
+            ccConfigFrame:SetPoint("CENTER")
+        end
+    end)
+
+    local bg = ccConfigFrame:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints(); bg:SetTexture(FLAT_TEX)
+    bg:SetVertexColor(0.08, 0.06, 0.03, 0.97)
+
+    local title = ccConfigFrame:CreateFontString(nil, "OVERLAY")
+    title:SetFont(FONT_FACE, 13, FONT_FLAGS)
+    title:SetPoint("TOP", ccConfigFrame, "TOP", 0, -30)
+    title:SetText("|cFFFFD100Configure CC Tracker|r")
+    title:SetShadowOffset(1, -1)
+
+    local subTxt = ccConfigFrame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    subTxt:SetPoint("TOP", ccConfigFrame, "TOP", 0, -48)
+    subTxt:SetText("Choose which classes to track")
+
+    local y = -64
+    for _, cls in ipairs(CC_CLASS_ORDER) do
+        local cc = CC_CLASS_PRIMARY[cls]
+        if cc then
+            local col = CLASS_COLORS[cls] or {1, 1, 1}
+            local cb = CreateFrame("CheckButton", nil, ccConfigFrame, "UICheckButtonTemplate")
+            cb:SetPoint("TOPLEFT", ccConfigFrame, "TOPLEFT", 10, y)
+            cb:SetChecked(not (db.ccHiddenClasses and db.ccHiddenClasses[cls]))
+
+            local lbl = cb.text or cb.Text
+            if lbl then
+                local r, g, b = col[1], col[2], col[3]
+                local hex = string.format("%02X%02X%02X",
+                    math.floor(r*255), math.floor(g*255), math.floor(b*255))
+                local cdStr = cc.cd > 0 and ("  |cFF888888" .. cc.cd .. "s|r") or ""
+                local clsName = cls:sub(1,1) .. cls:sub(2):lower():gsub("hunter", "Hunter")
+                clsName = clsName:gsub("deathknight", "Death Knight"):gsub("demonhunter", "Demon Hunter")
+                lbl:SetText("|cFF" .. hex .. clsName .. "|r — " .. cc.name .. cdStr)
+            end
+
+            local capturedCls = cls
+            cb:SetScript("OnClick", function(self)
+                if not db.ccHiddenClasses then db.ccHiddenClasses = {} end
+                if self:GetChecked() then
+                    db.ccHiddenClasses[capturedCls] = nil
+                else
+                    db.ccHiddenClasses[capturedCls] = true
+                end
+                ccDirty = true
+            end)
+            y = y - ROW
+        end
+    end
+
+    ccConfigFrame:Show()
+end
+
+-- Auto-restore CC Tracker on login if it was open last session
+C_Timer.After(3, function()
+    if db and db.showCCTracker then
+        CreateCCFrame()
     end
 end)
