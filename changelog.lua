@@ -4,6 +4,10 @@
 ]]
 
 LOXX_CHANGELOG = [[
+|cFFFFD100v1.5.5|r
+• Fix: Hunter kick bar no longer briefly resets during combat
+• Fix: CC Tracker cooldowns now accurate for all CC abilities
+
 |cFFFFD100v1.5.4|r
 • Fix: cast alert no longer causes taint error in WoW 12.0 (secret boolean from UnitCastingInfo)
 

@@ -46,7 +46,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.5.4"
+local LOXX_VERSION = "1.5.5"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -326,12 +326,12 @@ local CC_SPELLS = {
     [372245] = { name = "Terror of the Skies",   class = "EVOKER", dr = "Stuns" },
 
     -- Hunter
-    [19577]  = { name = "Intimidation",          class = "HUNTER", dr = "Stuns" },
-    [187650] = { name = "Freezing Trap",         class = "HUNTER", dr = "Incapacitates" },
-    [109248] = { name = "Binding Shot",          class = "HUNTER", dr = "Roots" },
-    [162480] = { name = "Steel Trap",            class = "HUNTER", dr = "Roots" },
+    [19577]  = { name = "Intimidation",          class = "HUNTER", dr = "Stuns",        cd = 60  },
+    [187650] = { name = "Freezing Trap",         class = "HUNTER", dr = "Incapacitates", cd = 25  },
+    [109248] = { name = "Binding Shot",          class = "HUNTER", dr = "Roots",        cd = 45  },
+    [162480] = { name = "Steel Trap",            class = "HUNTER", dr = "Roots",        cd = 30  },
     [1513]   = { name = "Scare Beast",           class = "HUNTER", dr = "Disorients" },
-    [190925] = { name = "Harpoon",               class = "HUNTER", dr = "Roots" },
+    [190925] = { name = "Harpoon",               class = "HUNTER", dr = "Roots",        cd = 20  },
 
     -- Mage
     [118]    = { name = "Polymorph",             class = "MAGE", dr = "Disorients" },
@@ -2174,8 +2174,11 @@ end
 ------------------------------------------------------------
 local function FindMyInterrupt()
     local oldSpellID = mySpellID
-    mySpellID = nil
-    myIsPetSpell = false
+    -- Use locals for detection — do NOT nil mySpellID until commit at the end.
+    -- This prevents UpdateDisplay from seeing a nil window during pet changes
+    -- (UNIT_PET fires frequently for BM/Survival Hunter) and falsely showing READY.
+    local detectedSpellID = nil
+    local detectedIsPet   = false
     -- Preserve existing cdEnd values
     local oldExtraKicks = myExtraKicks
     myExtraKicks = {}
@@ -2189,7 +2192,8 @@ local function FindMyInterrupt()
             if spyMode then
                 print("|cFF00DDDD[SPY]|r My spec " .. specID .. " has no interrupt")
             end
-            mySpellID = nil
+            mySpellID    = nil  -- explicit nil: this spec genuinely has no interrupt
+            myIsPetSpell = false
             if oldSpellID then
                 myCachedCD = nil; myBaseCd = nil
             end
@@ -2238,9 +2242,9 @@ local function FindMyInterrupt()
             end
 
             if petKnown then
-                mySpellID = override.id
+                detectedSpellID = override.id
                 myBaseCd = override.cd
-                myIsPetSpell = true
+                detectedIsPet = true
                 if spyMode then
                     print("|cFF00DDDD[SPY]|r My spec override: " ..
                         override.name .. " CD=" .. override.cd .. " (pet detected)")
@@ -2253,9 +2257,9 @@ local function FindMyInterrupt()
                 end
             end
         else
-            mySpellID = override.id
+            detectedSpellID = override.id
             myBaseCd = override.cd
-            myIsPetSpell = false
+            detectedIsPet = false
             if spyMode then
                 print("|cFF00DDDD[SPY]|r My spec override: " .. override.name .. " CD=" .. override.cd)
             end
@@ -2312,9 +2316,9 @@ local function FindMyInterrupt()
             if ok and result then known = true end
         end
         if known then
-            if not mySpellID then
-                mySpellID = sid
-            elseif sid ~= mySpellID and not myExtraKicks[sid] and not specManagedSpells[sid] then
+            if not detectedSpellID then
+                detectedSpellID = sid
+            elseif sid ~= detectedSpellID and not myExtraKicks[sid] and not specManagedSpells[sid] then
                 -- Don't add spells managed by SPEC_EXTRA_KICKS (talent check handles those)
                 local data = ALL_INTERRUPTS[sid]
                 if data then
@@ -2333,17 +2337,21 @@ local function FindMyInterrupt()
     local PET_SPELL_ICONS = {
         [119914] = 89766, -- Axe Toss: use pet version for correct icon
     }
-    if mySpellID and PET_SPELL_ICONS[mySpellID] and ALL_INTERRUPTS[mySpellID] then
-        local petSpellID = PET_SPELL_ICONS[mySpellID]
+    if detectedSpellID and PET_SPELL_ICONS[detectedSpellID] and ALL_INTERRUPTS[detectedSpellID] then
+        local petSpellID = PET_SPELL_ICONS[detectedSpellID]
         local ok, tex = pcall(C_Spell.GetSpellTexture, petSpellID)
         if ok and tex then
-            ALL_INTERRUPTS[mySpellID].icon = tex
+            ALL_INTERRUPTS[detectedSpellID].icon = tex
             if spyMode then
                 print("|cFF00DDDD[SPY]|r Cached icon for " ..
-                    mySpellID .. " from pet spell " .. petSpellID .. " → " .. tostring(tex))
+                    detectedSpellID .. " from pet spell " .. petSpellID .. " → " .. tostring(tex))
             end
         end
     end
+
+    -- Commit detected values — only now does mySpellID change (no nil window above)
+    mySpellID    = detectedSpellID
+    myIsPetSpell = detectedIsPet
 
     -- Only reset cached CD if spell changed
     if mySpellID ~= oldSpellID then
@@ -4635,10 +4643,12 @@ playerCastFrame:SetScript("OnEvent", function(_, _, unit, castGUID, spellID)
         local ccData = CC_SPELLS[spellID]
         if ccData then
             DLog("CC_SELF", ccData.name .. " (" .. ccData.dr .. ") spellID=" .. tostring(spellID))
-            -- Look up CD from CC_CLASS_PRIMARY (primary spell) or use 2s for no-CD spells
-            local ccCd = 2
+            -- Look up CD: use per-spell cd from CC_SPELLS if available,
+            -- override with CC_CLASS_PRIMARY when it is the primary spell.
+            -- Default 2s covers 0-CD spells (Polymorph, Hex, Fear…).
+            local ccCd = (CC_SPELLS[spellID] and CC_SPELLS[spellID].cd) or 2
             if myClass and CC_CLASS_PRIMARY[myClass] and CC_CLASS_PRIMARY[myClass].spellID == spellID then
-                ccCd = CC_CLASS_PRIMARY[myClass].cd > 0 and CC_CLASS_PRIMARY[myClass].cd or 2
+                ccCd = CC_CLASS_PRIMARY[myClass].cd > 0 and CC_CLASS_PRIMARY[myClass].cd or ccCd
             end
             -- Update own CC entry
             if myName and ccAddonUsers[myName] then
