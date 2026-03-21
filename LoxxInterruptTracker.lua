@@ -46,7 +46,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.5.3"
+local LOXX_VERSION = "1.5.4"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -5038,14 +5038,11 @@ mobCastAlertFrame:SetScript("OnEvent", function(_, event, unit, _castGUID, spell
     local okC, isControlled = pcall(UnitPlayerControlled, unit)
     if okC and isControlled then return end
 
-    -- Check that the cast is interruptible.
-    -- UnitCastingInfo returns: name, text, texture, startMS, endMS, isTradeSkill, castID, notInterruptible, spellID
-    local okCast, spellName, _, _, _, _, _, _, notInterruptible = pcall(UnitCastingInfo, unit)
+    -- Check that something is being cast.
+    -- notInterruptible is intentionally NOT read — it is a secret/tainted boolean in WoW 12.0
+    -- and performing any boolean test on it causes a taint error.
+    local okCast, spellName = pcall(function() return (UnitCastingInfo(unit)) end)
     if not okCast or not spellName then return end
-    if notInterruptible then
-        currentMobCasting = false
-        return
-    end
 
     -- Cast is interruptible: update shared state
     lastMobCastName   = spellName

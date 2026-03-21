@@ -4,6 +4,9 @@
 ]]
 
 LOXX_CHANGELOG = [[
+|cFFFFD100v1.5.4|r
+• Fix: cast alert no longer causes taint error in WoW 12.0 (secret boolean from UnitCastingInfo)
+
 |cFFFFD100v1.5.3|r
 • Fix: NPC companions in Follower Dungeons (e.g. Valeera Sanguinar) no longer receive false kick attribution
 
