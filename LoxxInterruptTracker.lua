@@ -46,7 +46,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.5.2"
+local LOXX_VERSION = "1.5.3"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -5082,7 +5082,7 @@ RegisterPartyWatchers = function()
                 --   2. They could actually have an interrupt (class check for unknown players)
                 -- This prevents healers without interrupts (Holy Priest, etc.) from
                 -- polluting recentPartyCasts and causing false correlations.
-                if cleanName and not noInterruptPlayers[cleanName] then
+                if UnitIsPlayer(cleanUnit) and cleanName and not noInterruptPlayers[cleanName] then
                     local info = partyAddonUsers[cleanName]
                     local kickOnCd = info and info.cdEnd and (info.cdEnd > GetTime() + 0.5)
                     if not kickOnCd then
@@ -5140,7 +5140,7 @@ RegisterPartyWatchers = function()
 
                 -- Store timestamp for correlation only if owner's kick is not already on CD
                 -- and the owner is not a known non-kicker (healer, etc.).
-                if cleanName and not noInterruptPlayers[cleanName] then
+                if UnitIsPlayer(ownerUnit) and cleanName and not noInterruptPlayers[cleanName] then
                     local info = partyAddonUsers[cleanName]
                     local kickOnCd = info and info.cdEnd and (info.cdEnd > GetTime() + 0.5)
                     if not kickOnCd then

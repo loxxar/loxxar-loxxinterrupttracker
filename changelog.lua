@@ -4,6 +4,9 @@
 ]]
 
 LOXX_CHANGELOG = [[
+|cFFFFD100v1.5.3|r
+• Fix: NPC companions in Follower Dungeons (e.g. Valeera Sanguinar) no longer receive false kick attribution
+
 |cFFFFD100v1.5.2|r
 • Fix: your own kick now correctly competes with party members for attribution
 
