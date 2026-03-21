@@ -4,6 +4,9 @@
 ]]
 
 LOXX_CHANGELOG = [[
+|cFFFFD100v1.5.1|r
+• Fix: CC Tracker bars now correctly display in dungeons
+
 |cFFFFD100v1.5.0|r
 • CC Tracker — dedicated window tracking crowd-control per class (Polymorph, Blind, etc.)
 • Healer support — tracker now visible even when your spec has no interrupt

@@ -46,7 +46,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.5.0"
+local LOXX_VERSION = "1.5.1"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -2705,20 +2705,7 @@ local function CreateConfigPanel()
         if ccConfigFrame then
             ccConfigFrame:Hide()
         end
-        -- CC Tracker: hide visually when config closes (db.showCCTracker unchanged)
-        if ccFrame then
-            ccFrame:Hide()
-        end
-    end)
-    -- When config reopens: restore CC Tracker if it was active
-    configFrame:SetScript("OnShow", function()
-        if db and db.showCCTracker then
-            if ccFrame then
-                ccFrame:Show()
-            else
-                CreateCCFrame()
-            end
-        end
+        -- Note: ccFrame (CC Tracker) is a gameplay window — NOT closed with config
     end)
 
     -- Header background: warm dark
@@ -5608,8 +5595,8 @@ CreateCCFrame = function()
     end)
     ccFrame:SetScript("OnHide", function()
         -- db.showCCTracker is set by ToggleCCTracker only — not here
-        -- (prevents OnHide from persisting "off" when closed by configFrame)
     end)
+    ccFrame:SetClampedToScreen(true)
 
     -- Background
     local bg = ccFrame:CreateTexture(nil, "BACKGROUND")
