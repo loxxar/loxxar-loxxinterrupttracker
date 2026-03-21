@@ -4,6 +4,9 @@
 ]]
 
 LOXX_CHANGELOG = [[
+|cFFFFD100v1.5.2|r
+• Fix: your own kick now correctly competes with party members for attribution
+
 |cFFFFD100v1.5.1|r
 • Fix: CC Tracker bars now correctly display in dungeons
 

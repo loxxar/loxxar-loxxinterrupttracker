@@ -46,7 +46,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.5.1"
+local LOXX_VERSION = "1.5.2"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -4777,6 +4777,9 @@ local function OnMobInterrupted(unit)
     local bestDelta = 999
     local staleKeys = {}
 
+    -- Compute SELF delta early so it can compete with party candidates
+    local selfDelta = selfKickTime > 0 and (now - selfKickTime) or 999
+
     for name, ts in pairs(recentPartyCasts) do
         local delta = now - ts
         if delta > 0.5 then
@@ -4799,15 +4802,22 @@ local function OnMobInterrupted(unit)
     end
     for _, k in ipairs(staleKeys) do recentPartyCasts[k] = nil end
 
+    -- SELF competes: if SELF delta is equal or better than the best party candidate,
+    -- SELF wins and gets credit. Ties go to SELF (guaranteed knowledge vs correlation).
+    if selfDelta < 0.5 and selfDelta <= bestDelta then
+        bestName = nil  -- redirect to SELF path below
+        bestDelta = selfDelta
+    end
+
     if bestName and bestDelta < 0.5 then
         -- Consume the timestamp so duplicate INTERRUPTED events (nameplate + target
         -- firing for the same mob in the same frame) cannot match this player again.
         recentPartyCasts[bestName] = nil
 
-        -- If SELF also cast an interrupt within the same window, consume selfKickTime
-        -- and cancel any pending missed-kick timers to prevent false attribution.
-        if selfKickTime > 0 and (now - selfKickTime) < 0.5 then
-            selfKickTime = 0
+        -- If SELF also kicked within the window, cancel any pending missed-kick timers
+        -- (the mob was handled, so it's not a miss for us). Keep selfKickTime alive so
+        -- SELF can still get credit for another mob interrupted in the same burst.
+        if selfDelta < 0.5 then
             local ok_g, guid = pcall(UnitGUID, unit)
             if ok_g and guid then CancelMissForGUID(guid) end
         end
@@ -4877,8 +4887,7 @@ local function OnMobInterrupted(unit)
         end
     else
         -- SELF's casts never enter recentPartyCasts (they go through myKickCdEnd directly).
-        -- Fall back to the dedicated selfKickTime timestamp.
-        local selfDelta = selfKickTime > 0 and (now - selfKickTime) or 999
+        -- Fall back to the dedicated selfKickTime timestamp (selfDelta computed above).
         if selfDelta < 1.5 then
             selfKickTime = 0
             -- Dedup: same mob may fire on multiple unit frames within the same tick
