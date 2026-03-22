@@ -46,7 +46,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.5.5"
+local LOXX_VERSION = "1.5.5.1"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -171,6 +171,8 @@ local DEFAULTS = {
     scoreFrameY       = nil,
     ccConfigFrameX    = nil,
     ccConfigFrameY    = nil,
+    showNextIndicator      = true,   -- show NEXT badge on kick rotation bars
+    showEstimatedIndicator = true,   -- show ~ badge on bars without LOXX addon
 }
 
 ------------------------------------------------------------
@@ -707,6 +709,7 @@ local function AnnounceJoin()
     local joinMsg = "JOIN:" .. myClass .. ":" .. mySpellID .. ":" .. cd .. ":" .. LOXX_VERSION
     SendLOXX(joinMsg)
     DLog("JOIN", "SENT cls=" .. tostring(myClass) .. " spellID=" .. tostring(mySpellID) .. " cd=" .. cd .. " ver=" .. LOXX_VERSION)
+    if LoxxRotation then LoxxRotation.UpdateRoster(partyAddonUsers, myName) end
 end
 
 -- Broadcasts current cdEnd to the party so latecomers can resync.
@@ -852,6 +855,10 @@ local function OnAddonMessage(prefix, message, channel, sender)
         else
             DLog("SYNC", "REQ_STATE from " .. shortName .. " → no reply (not on CD)")
         end
+
+    elseif command == "ROTATION" then
+        -- Rotation Manager sync: peer broadcast their kick rotation order.
+        if LoxxRotation then LoxxRotation.HandleMessage(parts, shortName) end
 
     elseif command == "CCCAST" then
         -- CC Tracker sync: peer used their CC ability.  format: CCCAST:spellID:cd
@@ -1660,6 +1667,24 @@ local function RebuildBars()
         deadBadge:Hide()
         f.deadBadge = deadBadge
 
+        -- NEXT badge (▶ top-left, green — shown when this player is next in rotation)
+        local nextBadge = content:CreateFontString(nil, "OVERLAY")
+        nextBadge:SetFont(FONT_FACE, 7, "OUTLINE")
+        nextBadge:SetTextColor(0.15, 1.0, 0.45, 1)
+        nextBadge:SetPoint("TOPLEFT", 2, -1)
+        nextBadge:SetText("▶")
+        nextBadge:Hide()
+        f.nextBadge = nextBadge
+
+        -- Estimated indicator (~ bottom-right, yellow-gray — no LOXX addon on this player)
+        local estIcon = content:CreateFontString(nil, "OVERLAY")
+        estIcon:SetFont(FONT_FACE, 8, "OUTLINE")
+        estIcon:SetTextColor(0.65, 0.60, 0.10, 0.85)
+        estIcon:SetPoint("BOTTOMRIGHT", -18, 1)
+        estIcon:SetText("~")
+        estIcon:Hide()
+        f.estimatedIcon = estIcon
+
         f:EnableMouse(true)
         f:SetScript("OnEnter", function(self)
             if not db.showTooltip then return end
@@ -1880,6 +1905,14 @@ local function UpdateDisplay()
         bar.ttPlayerName  = name
         bar.ttClassColor  = col
         bar.ttIsEstimated = isEstimated
+        -- Estimated visual indicator (~ badge bottom-right)
+        if bar.estimatedIcon then
+            if isEstimated and db and db.showEstimatedIndicator then
+                bar.estimatedIcon:Show()
+            else
+                bar.estimatedIcon:Hide()
+            end
+        end
         -- Missed kick badge
         if bar.missedBadge then
             local misses = loxxCurrentRun and loxxCurrentRun.missedKicks and loxxCurrentRun.missedKicks[name]
@@ -2141,6 +2174,14 @@ local function UpdateDisplay()
     end
 
     for i = barIdx, currentMaxBars do bars[i]:Hide() end
+
+    -- Rotation Manager: mark NEXT badge on rendered bars
+    if LoxxRotation then
+        LoxxRotation.MarkNextKicker(
+            bars, barIdx - 1,
+            partyAddonUsers, myName, myKickCdEnd, myExtraKicks,
+            now, db and db.showNextIndicator)
+    end
 
     local numVisible = barIdx - 1
 
@@ -3067,6 +3108,10 @@ local function CreateConfigPanel()
     CreateCheckbox(configFrame, L["CB_TOOLTIP"], R_CBX1, yR, "showTooltip")
     yR = yR - 28
     CreateCheckbox(configFrame, L["CB_ALERT_CAST"], R_CBX1, yR, "alertOnCast")
+    yR = yR - 28
+    CreateCheckbox(configFrame, "Show NEXT indicator", R_CBX1, yR, "showNextIndicator", UpdateDisplay)
+    yR = yR - 28
+    CreateCheckbox(configFrame, "Show estimated (~) badge", R_CBX1, yR, "showEstimatedIndicator", UpdateDisplay)
 
     -- History limit dropdown
     yR = yR - 48
@@ -5312,6 +5357,7 @@ ef:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
         if UpdateMaxBars() then RebuildBars() end
         C_Timer.After(1, QueuePartyInspect)
         if PopulateCCUsers then C_Timer.After(0.5, PopulateCCUsers) end
+        if LoxxRotation then LoxxRotation.UpdateRoster(partyAddonUsers, myName) end
 
     elseif event == "PLAYER_ENTERING_WORLD" then
         inCombat = InCombatLockdown()

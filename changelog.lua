@@ -4,6 +4,13 @@
 ]]
 
 LOXX_CHANGELOG = [[
+|cFFFFD100v1.5.5.1|r
+• Kick Rotation Manager — automatically determines who should interrupt next
+• NEXT indicator on bars — green ▶ marks the next kicker in rotation
+• Estimated badge — ~ on bars without the addon (class-based tracking)
+• Rotation syncs across all party members with the addon
+• New options: show/hide NEXT indicator and estimated badge
+
 |cFFFFD100v1.5.5|r
 • Fix: Hunter kick bar no longer briefly resets during combat
 • Fix: CC Tracker cooldowns now accurate for all CC abilities
