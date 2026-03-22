@@ -3212,7 +3212,7 @@ local function CreateConfigPanel()
 
     local scoreBtn = CreateFrame("Button", nil, footerBand, "UIPanelButtonTemplate")
     scoreBtn:SetSize(110, 24)
-    scoreBtn:SetPoint("TOPRIGHT", footerBand, "TOPRIGHT", -14, -10)
+    scoreBtn:SetPoint("TOP", savePosBtn, "BOTTOM", 0, -6)
     scoreBtn:SetText("Score")
     if scoreBtn.GetFontString and scoreBtn:GetFontString() then
         scoreBtn:GetFontString():SetTextColor(1, 0.82, 0)
