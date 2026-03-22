@@ -46,7 +46,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.5.5.2"
+local LOXX_VERSION = "1.5.5.3"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -240,6 +240,7 @@ local ccFrame              = nil  -- CC Tracker window
 local ccBars               = {}   -- CC bar frames
 local ccDirty              = true -- rebuild CC bar list next tick
 local ccTicker             = nil  -- CC update ticker
+local RebuildCCBars                -- forward declaration (defined later, called from RebuildBars)
 local recentPartyCasts     = {}    -- name → timestamp of last interrupt cast (for MOB INTERRUPTED correlation)
 local activeChannels       = {}    -- unit → expected channel endTime (for CHANNEL_STOP early-end detection)
 local pendingMissedKick    = {}    -- token → { unit, timer }
@@ -584,11 +585,16 @@ end
 ------------------------------------------------------------
 local function DLog(cat, msg)
     if not loxxDungeonLogActive then return end
-    local t = date("%H:%M:%S")
-    local entry = "[" .. t .. "][" .. cat .. "] " .. tostring(msg)
-    table.insert(loxxDungeonLog, entry)
-    if #loxxDungeonLog > DUNGEON_LOG_MAX then
-        table.remove(loxxDungeonLog, 1)
+    -- pcall protects against taint: date() or concatenation can return a secret value
+    -- when called from a protected/secure context in WoW Midnight 12.0.
+    local ok, entry = pcall(function()
+        return "[" .. date("%H:%M:%S") .. "][" .. cat .. "] " .. tostring(msg)
+    end)
+    if ok and type(entry) == "string" then
+        table.insert(loxxDungeonLog, entry)
+        if #loxxDungeonLog > DUNGEON_LOG_MAX then
+            table.remove(loxxDungeonLog, 1)
+        end
     end
 end
 
@@ -1602,13 +1608,21 @@ local function RebuildBars()
         ico:SetTexCoord(0.08, 0.92, 0.08, 0.92)
         f.icon = ico
 
-        -- Bar background (uniform dark, Details-style)
+        -- Bar background (uniform dark)
         local barBg = f:CreateTexture(nil, "BACKGROUND")
         barBg:SetPoint("TOPLEFT", iconS, 0)
         barBg:SetPoint("BOTTOMRIGHT", 0, 0)
         barBg:SetTexture(BAR_TEXTURE)
         barBg:SetVertexColor(0.08, 0.08, 0.08, 1)
         f.barBg = barBg
+
+        -- Class color tint (Borderless Clean: subtle class-color glow, set per render)
+        local barTint = f:CreateTexture(nil, "BORDER")
+        barTint:SetPoint("TOPLEFT", iconS, 0)
+        barTint:SetPoint("BOTTOMRIGHT", 0, 0)
+        barTint:SetTexture(BAR_TEXTURE)
+        barTint:SetVertexColor(0, 0, 0, 0)
+        f.barTint = barTint
 
         -- StatusBar
         local sb = CreateFrame("StatusBar", nil, f)
@@ -1680,14 +1694,6 @@ local function RebuildBars()
         deadBadge:Hide()
         f.deadBadge = deadBadge
 
-        -- NEXT badge (▶ top-left, green — shown when this player is next in rotation)
-        local nextBadge = content:CreateFontString(nil, "OVERLAY")
-        nextBadge:SetFont(FONT_FACE, 7, "OUTLINE")
-        nextBadge:SetTextColor(0.15, 1.0, 0.45, 1)
-        nextBadge:SetPoint("TOPLEFT", 2, -1)
-        nextBadge:SetText("▶")
-        nextBadge:Hide()
-        f.nextBadge = nextBadge
 
         -- Estimated indicator (~ bottom-right, yellow-gray — no LOXX addon on this player)
         local estIcon = content:CreateFontString(nil, "OVERLAY")
@@ -1697,6 +1703,31 @@ local function RebuildBars()
         estIcon:SetText("~")
         estIcon:Hide()
         f.estimatedIcon = estIcon
+
+        -- Pseudo-pill rounded corners: small dark pixel covers at each corner,
+        -- colour matching the main window background (0.06, 0.06, 0.06).
+        -- Icon gets left-side covers; bar area gets right-side covers.
+        -- This gives a clean pill shape without requiring custom textures.
+        do
+            local cSz = math.max(3, math.floor(barH * 0.22))
+            local pr, pg, pb = 0.06, 0.06, 0.06  -- matches mainFrame bg
+            -- Icon: round top-left and bottom-left
+            for _, anchor in ipairs({ "TOPLEFT", "BOTTOMLEFT" }) do
+                local c = f:CreateTexture(nil, "OVERLAY", nil, 7)
+                c:SetSize(cSz, cSz)
+                c:SetPoint(anchor, ico, anchor, 0, 0)
+                c:SetTexture(FLAT_TEX)
+                c:SetVertexColor(pr, pg, pb, 1)
+            end
+            -- Bar area: round top-right and bottom-right
+            for _, anchor in ipairs({ "TOPRIGHT", "BOTTOMRIGHT" }) do
+                local c = content:CreateTexture(nil, "OVERLAY", nil, 7)
+                c:SetSize(cSz, cSz)
+                c:SetPoint(anchor, 0, 0)
+                c:SetTexture(FLAT_TEX)
+                c:SetVertexColor(pr, pg, pb, 1)
+            end
+        end
 
         f:EnableMouse(true)
         f:SetScript("OnEnter", function(self)
@@ -1755,6 +1786,15 @@ local function CheckZoneVisibility()
             mainFrame:Show()
         else
             mainFrame:Hide()
+        end
+    end
+
+    -- Sync CC frame to the same layout settings (width, alpha, bar sizes)
+    if ccFrame then
+        ccFrame:SetWidth(db.frameWidth)
+        ccFrame:SetAlpha(db.alpha)
+        if ccFrame:IsShown() then
+            RebuildCCBars()
         end
     end
 end
@@ -1944,6 +1984,8 @@ local function UpdateDisplay()
                 bar.deadBadge:Hide()
             end
         end
+        -- Class tint (Borderless Clean: always set to current player's class color)
+        if bar.barTint then bar.barTint:SetVertexColor(col[1], col[2], col[3], 0.12) end
         if rem > 0.5 then
             bar.cdBar:SetValue(rem)
             bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
@@ -1953,11 +1995,10 @@ local function UpdateDisplay()
             bar.ttRem = rem
         else
             bar.cdBar:SetMinMaxValues(0, 1)
-            bar.cdBar:SetValue(1)
+            bar.cdBar:SetValue(0)  -- empty bar when READY; tint provides the class-color glow
             bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
             bar.partyCdText:SetFont(FONT_FACE, bar.readyFontSz, FONT_FLAGS)
             bar.partyCdText:SetText(db.showReady and L["READY"] or "")
-            bar.partyCdText:SetTextColor(unpack(FONT_READY_COLOR))
             bar.partyCdText:SetTextColor(unpack(FONT_READY_COLOR))
             bar.ttRem = 0
         end
@@ -1988,6 +2029,8 @@ local function UpdateDisplay()
             end
         end
 
+        -- Class tint (Borderless Clean)
+        if bar.barTint then bar.barTint:SetVertexColor(col[1], col[2], col[3], 0.12) end
         if myKickCdEnd > now then
             local cdRemaining = myKickCdEnd - now
             bar.partyCdText:Hide()
@@ -2013,7 +2056,7 @@ local function UpdateDisplay()
             bar.partyCdText:SetText(db.showReady and L["READY"] or "")
             bar.partyCdText:SetTextColor(unpack(FONT_READY_COLOR))
             bar.cdBar:SetMinMaxValues(0, 1)
-            bar.cdBar:SetValue(1)
+            bar.cdBar:SetValue(0)  -- empty bar when READY; tint provides the class-color glow
             bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
             bar.ttRem = 0
         end
@@ -2038,6 +2081,8 @@ local function UpdateDisplay()
             bar.ttPlayerName = myName or "?"
             bar.ttClassColor = col
 
+            -- Class tint (Borderless Clean)
+            if bar.barTint then bar.barTint:SetVertexColor(col[1], col[2], col[3], 0.12) end
             if ekInfo.cdEnd > now then
                 local ekRem = ekInfo.cdEnd - now
                 bar.partyCdText:Hide()
@@ -2058,7 +2103,7 @@ local function UpdateDisplay()
                 bar.partyCdText:SetText(db.showReady and L["READY"] or "")
                 bar.partyCdText:SetTextColor(unpack(FONT_READY_COLOR))
                 bar.cdBar:SetMinMaxValues(0, 1)
-                bar.cdBar:SetValue(1)
+                bar.cdBar:SetValue(0)  -- empty bar when READY; tint provides the class-color glow
                 bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
                 bar.ttRem = 0
             end
@@ -3709,7 +3754,14 @@ local function SetupSlash()
                     local count = #filtered
                     local startIdx = math.max(1, count - DISPLAY_MAX + 1)
                     local slice = {}
-                    for i = startIdx, count do slice[#slice + 1] = filtered[i] end
+                    for i = startIdx, count do
+                        local v = filtered[i]
+                        -- Guard against tainted/secret values (WoW may mark entries opaque
+                        -- when DLog fires from a protected context). Skip non-strings silently.
+                        if type(v) == "string" then
+                            slice[#slice + 1] = v
+                        end
+                    end
                     eb:SetText(table.concat(slice, "\n"))
                     eb:SetWidth(sf:GetWidth())
                     local label = filter or "ALL"
@@ -5523,6 +5575,14 @@ local function BuildOneCCBar(parent)
     barBg:SetTexture(BAR_TEXTURE)
     barBg:SetVertexColor(0.08, 0.08, 0.08, 1)
 
+    -- Class color tint (Borderless Clean: subtle class-color glow, set per render)
+    local barTint = f:CreateTexture(nil, "BORDER")
+    barTint:SetPoint("TOPLEFT", iconS, 0)
+    barTint:SetPoint("BOTTOMRIGHT", 0, 0)
+    barTint:SetTexture(BAR_TEXTURE)
+    barTint:SetVertexColor(0, 0, 0, 0)
+    f.barTint = barTint
+
     local sb = CreateFrame("StatusBar", nil, f)
     sb:SetPoint("TOPLEFT", iconS, 0)
     sb:SetPoint("BOTTOMRIGHT", 0, 0)
@@ -5558,12 +5618,34 @@ local function BuildOneCCBar(parent)
     f.cdText    = ct
     f.cdFontSz  = cdFontSize
     f.readyFontSz = readyFontSz
+
+    -- Pseudo-pill rounded corners (same as interrupt bars)
+    do
+        local cSz = math.max(3, math.floor(barH * 0.22))
+        local pr, pg, pb = 0.06, 0.06, 0.06
+        for _, anchor in ipairs({ "TOPLEFT", "BOTTOMLEFT" }) do
+            local c = f:CreateTexture(nil, "OVERLAY", nil, 7)
+            c:SetSize(cSz, cSz)
+            c:SetPoint(anchor, ico, anchor, 0, 0)
+            c:SetTexture(FLAT_TEX)
+            c:SetVertexColor(pr, pg, pb, 1)
+        end
+        for _, anchor in ipairs({ "TOPRIGHT", "BOTTOMRIGHT" }) do
+            local c = content:CreateTexture(nil, "OVERLAY", nil, 7)
+            c:SetSize(cSz, cSz)
+            c:SetPoint(anchor, 0, 0)
+            c:SetTexture(FLAT_TEX)
+            c:SetVertexColor(pr, pg, pb, 1)
+        end
+    end
+
     f:Hide()
     return f
 end
 
 -- Rebuild all CC bars (called when frame is created or layout changes).
-local function RebuildCCBars()
+-- Also assigned to the forward-declared local at line 243 so RebuildBars() can call it.
+RebuildCCBars = function()
     if not ccFrame then return end
     for i = 1, MAX_BARS do
         if ccBars[i] then ccBars[i]:Hide(); ccBars[i]:SetParent(nil); ccBars[i] = nil end
@@ -5584,6 +5666,8 @@ local function RenderCCBar(bar, name, icon, col, spellName, baseCd, rem, isUnkno
     bar.icon:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
     bar.nameText:SetText(name)
     bar.nameText:SetTextColor(unpack(FONT_COLOR))
+    -- Class tint (Borderless Clean)
+    if bar.barTint then bar.barTint:SetVertexColor(col[1], col[2], col[3], 0.12) end
     local maxVal = math.max(1, baseCd or 1)
     bar.cdBar:SetMinMaxValues(0, maxVal)
     if rem > 0.5 then
@@ -5593,7 +5677,8 @@ local function RenderCCBar(bar, name, icon, col, spellName, baseCd, rem, isUnkno
         bar.cdText:SetText(string.format("%.0f", rem))
         bar.cdText:SetTextColor(unpack(FONT_COLOR))
     else
-        bar.cdBar:SetMinMaxValues(0, 1); bar.cdBar:SetValue(1)
+        bar.cdBar:SetMinMaxValues(0, 1)
+        bar.cdBar:SetValue(0)  -- empty bar when READY; tint provides the class-color glow
         bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
         bar.cdText:SetFont(FONT_FACE, bar.readyFontSz, FONT_FLAGS)
         if isUnknown then

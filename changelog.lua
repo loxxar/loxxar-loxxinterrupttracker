@@ -4,6 +4,13 @@
 ]]
 
 LOXX_CHANGELOG = [[
+|cFFFFD100v1.5.5.3|r
+• New bar design: each bar now has a subtle class-color background matching the player's class
+• Ready state is now visually cleaner — the bar clears when a player is ready
+• CC tracker bars now follow the same design as interrupt bars
+• Fixed: NEXT indicator no longer appears as a stray character on player names
+• Fixed: dungeon log viewer no longer crashes when viewing long sessions
+
 |cFFFFD100v1.5.5.2|r
 • Sync: your spec is now included when syncing with group members
 • New option: enable or disable broadcasting your kick data to the group

@@ -123,7 +123,8 @@ function LoxxRotation.GetNextKicker(partyAddonUsers, myName, myKickCdEnd, myExtr
 end
 
 -- Called each UpdateDisplay tick.
--- Marks/unmarks nextBadge on all rendered bars.
+-- Prefixes "▶ " to the name text of the next kicker; removes it from others.
+-- Uses inline color so no separate badge frame is needed (avoids overlap with name text).
 function LoxxRotation.MarkNextKicker(bars, barCount, partyAddonUsers, myName, myKickCdEnd, myExtraKicks, now, showNext)
     local nextKicker = nil
     if showNext then
@@ -131,11 +132,11 @@ function LoxxRotation.MarkNextKicker(bars, barCount, partyAddonUsers, myName, my
     end
     for i = 1, barCount do
         local bar = bars[i]
-        if bar and bar.nextBadge then
+        if bar and bar.nameText and bar.ttPlayerName then
             if nextKicker and bar.ttPlayerName == nextKicker then
-                bar.nextBadge:Show()
+                bar.nameText:SetText("|cFF26FF73▶|r " .. bar.ttPlayerName)
             else
-                bar.nextBadge:Hide()
+                bar.nameText:SetText(bar.ttPlayerName)
             end
         end
     end
