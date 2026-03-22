@@ -163,8 +163,7 @@ local DEFAULTS = {
     ccHiddenClasses   = {},
     configFrameX      = nil,
     configFrameY      = nil,
-    changelogFrameX   = nil,
-    changelogFrameY   = nil,
+
     statsFrameX       = nil,
     statsFrameY       = nil,
     scoreFrameX       = nil,
@@ -2593,7 +2592,7 @@ end
 ------------------------------------------------------------
 -- Frame position save/restore (defined early for CreateConfigPanel)
 ------------------------------------------------------------
--- Save/restore helpers for secondary windows (config, stats, changelog, score, ccConfig)
+-- Save/restore helpers for secondary windows (config, stats, score, ccConfig)
 local function SaveWinPos(keyX, keyY, frame)
     if frame and db then
         db[keyX] = frame:GetLeft()
@@ -2643,97 +2642,6 @@ local function LoxxRestoreFramePosition(frame)
     end
 end
 
-------------------------------------------------------------
--- Changelog window (same design as config, attached to it)
-------------------------------------------------------------
-local changelogFrame = nil
-local function ShowChangelogWindow()
-    if changelogFrame and changelogFrame:IsShown() then
-        changelogFrame:Hide()
-        return
-    end
-    if changelogFrame then
-        changelogFrame:Show()
-        return
-    end
-
-    local CW, CH = 420, 500
-    changelogFrame = CreateFrame("Frame", "LoxxChangelogFrame", UIParent, "BasicFrameTemplate")
-    changelogFrame:SetSize(CW, CH)
-    RestoreWinPos("changelogFrameX", "changelogFrameY", changelogFrame, function()
-        changelogFrame:SetPoint("TOPLEFT", configFrame, "TOPRIGHT", 4, 0)
-    end)
-    changelogFrame:SetFrameStrata("DIALOG")
-    changelogFrame:SetMovable(true)
-    changelogFrame:EnableMouse(true)
-    changelogFrame:RegisterForDrag("LeftButton")
-    changelogFrame:SetScript("OnDragStart", changelogFrame.StartMoving)
-    changelogFrame:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        SaveWinPos("changelogFrameX", "changelogFrameY", self)
-        -- Score follows below Changelog
-        if scoreFrame and scoreFrame:IsShown() then
-            scoreFrame:ClearAllPoints()
-            scoreFrame:SetPoint("TOPLEFT", self, "BOTTOMLEFT", 0, -4)
-        end
-    end)
-    changelogFrame:SetClampedToScreen(true)
-    if changelogFrame.TitleText then changelogFrame.TitleText:SetText("") end
-
-    -- Header (same as config)
-    local hdr = changelogFrame:CreateTexture(nil, "BACKGROUND", nil, 2)
-    hdr:SetTexture(FLAT_TEX)
-    hdr:SetVertexColor(0.12, 0.09, 0.02, 1)
-    hdr:SetPoint("TOPLEFT", 0, -22)
-    hdr:SetPoint("TOPRIGHT", 0, -22)
-    hdr:SetHeight(64)
-    local hdrLineTop = changelogFrame:CreateTexture(nil, "BORDER")
-    hdrLineTop:SetTexture(FLAT_TEX)
-    hdrLineTop:SetVertexColor(0.87, 0.73, 0.37, 0.75)
-    hdrLineTop:SetPoint("TOPLEFT", 0, -22)
-    hdrLineTop:SetPoint("TOPRIGHT", 0, -22)
-    hdrLineTop:SetHeight(1)
-    local hdrLineBot = changelogFrame:CreateTexture(nil, "BORDER")
-    hdrLineBot:SetTexture(FLAT_TEX)
-    hdrLineBot:SetVertexColor(0.87, 0.73, 0.37, 0.75)
-    hdrLineBot:SetPoint("TOPLEFT", 0, -86)
-    hdrLineBot:SetPoint("TOPRIGHT", 0, -86)
-    hdrLineBot:SetHeight(1)
-    local hdrTitle = changelogFrame:CreateFontString(nil, "OVERLAY")
-    hdrTitle:SetFont(FONT_FACE, 22, FONT_FLAGS)
-    hdrTitle:SetShadowOffset(2, -2)
-    hdrTitle:SetShadowColor(0, 0, 0, 1)
-    hdrTitle:SetPoint("TOP", 0, -40)
-    hdrTitle:SetJustifyH("CENTER")
-    hdrTitle:SetText("|cFFFFD100" .. L["CHANGELOG_TITLE"] .. "|r")
-
-    -- ScrollFrame
-    local scroll = CreateFrame("ScrollFrame", nil, changelogFrame, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 16, -100)
-    scroll:SetPoint("BOTTOMRIGHT", -32, 40)
-
-    local content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(CW - 60, 100)
-    scroll:SetScrollChild(content)
-
-    local txt = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    txt:SetPoint("TOPLEFT", 0, 0)
-    txt:SetWidth(CW - 60)
-    txt:SetJustifyH("LEFT")
-    txt:SetJustifyV("TOP")
-    txt:SetWordWrap(true)
-    txt:SetNonSpaceWrap(false)
-    txt:SetFont(FONT_FACE, 10, FONT_FLAGS)
-    txt:SetText(LOXX_CHANGELOG or L["CHANGELOG_EMPTY"])
-
-    -- Hauteur du contenu pour le scroll (estimation par lignes)
-    local lineHeight = 18
-    local lineCount = 1
-    for _ in (LOXX_CHANGELOG or ""):gmatch("\n") do lineCount = lineCount + 1 end
-    content:SetHeight(math.max(400, lineCount * lineHeight))
-
-    changelogFrame:Show()
-end
 
 local function CreateConfigPanel()
     if configFrame then
@@ -2763,19 +2671,10 @@ local function CreateConfigPanel()
             statsFrame:ClearAllPoints()
             statsFrame:SetPoint("TOPRIGHT", configFrame, "TOPLEFT", -4, 0)
         end
-        -- Changelog: right of config
-        if changelogFrame and changelogFrame:IsShown() then
-            changelogFrame:ClearAllPoints()
-            changelogFrame:SetPoint("TOPLEFT", configFrame, "TOPRIGHT", 4, 0)
-        end
-        -- Score: below changelog (or right of config if changelog closed)
+        -- Score: right of config
         if scoreFrame and scoreFrame:IsShown() then
             scoreFrame:ClearAllPoints()
-            if changelogFrame and changelogFrame:IsShown() then
-                scoreFrame:SetPoint("TOPLEFT", changelogFrame, "BOTTOMLEFT", 0, -4)
-            else
-                scoreFrame:SetPoint("TOPLEFT", configFrame, "TOPRIGHT", 4, 0)
-            end
+            scoreFrame:SetPoint("TOPLEFT", configFrame, "TOPRIGHT", 4, 0)
         end
         -- CC Config: below stats (or left of config if stats closed)
         if ccConfigFrame and ccConfigFrame:IsShown() then
@@ -2802,9 +2701,6 @@ local function CreateConfigPanel()
     configFrame:SetScript("OnHide", function()
         if statsFrame then
             statsFrame:Hide(); statsFrame = nil
-        end
-        if changelogFrame then
-            changelogFrame:Hide(); changelogFrame = nil
         end
         if scoreFrame then
             scoreFrame:Hide(); scoreFrame = nil
@@ -3256,15 +3152,9 @@ local function CreateConfigPanel()
     footerButtons:SetSize(470, 28)
     footerButtons:SetPoint("TOPRIGHT", footerBand, "TOPRIGHT", -14, -10)
 
-    local changelogBtn = CreateFrame("Button", nil, footerButtons, "UIPanelButtonTemplate")
-    changelogBtn:SetSize(110, 24)
-    changelogBtn:SetPoint("RIGHT", footerButtons, "RIGHT", 0, 0)
-    changelogBtn:SetText(L["BTN_CHANGELOG"])
-    changelogBtn:SetScript("OnClick", function() ShowChangelogWindow() end)
-
     local savePosBtn = CreateFrame("Button", nil, footerButtons, "UIPanelButtonTemplate")
     savePosBtn:SetSize(120, 24)
-    savePosBtn:SetPoint("RIGHT", changelogBtn, "LEFT", -10, 0)
+    savePosBtn:SetPoint("RIGHT", footerButtons, "RIGHT", 0, 0)
     savePosBtn:SetText(L["BTN_SAVE_POS"])
     savePosBtn:SetScript("OnClick", function()
         local function toChat(msg)
@@ -3312,7 +3202,7 @@ local function CreateConfigPanel()
         local p = "|cFF00DDDD[LOXX]|r "
         print(p .. "|cFFFFFF00/loxx|r — toggle tracker")
         print(p .. "|cFFFFFF00/loxx score|r — all-time kick score")
-        print(p .. "|cFFFFFF00/loxx changelog|r — show changelog")
+
         print(p .. "|cFFFFFF00/loxx runs|r — show run history")
         print(p .. "|cFFFFFF00/loxx csv|r — export stats as CSV")
         print(p .. "|cFFFFFF00/loxx cc|r — toggle CC Tracker")
@@ -3320,10 +3210,9 @@ local function CreateConfigPanel()
         print(p .. "|cFFFFFF00/loxx config|r — open settings")
     end)
 
-    -- Score button: below Changelog button
     local scoreBtn = CreateFrame("Button", nil, footerBand, "UIPanelButtonTemplate")
     scoreBtn:SetSize(110, 24)
-    scoreBtn:SetPoint("TOP", changelogBtn, "BOTTOM", 0, -6)
+    scoreBtn:SetPoint("TOPRIGHT", footerBand, "TOPRIGHT", -14, -10)
     scoreBtn:SetText("Score")
     if scoreBtn.GetFontString and scoreBtn:GetFontString() then
         scoreBtn:GetFontString():SetTextColor(1, 0.82, 0)
@@ -4259,9 +4148,7 @@ ShowScoreWindow = function()
     local sf = CreateFrame("Frame", "LoxxScoreFrame", UIParent, "BasicFrameTemplate")
     sf:SetSize(SW, SH)
     RestoreWinPos("scoreFrameX", "scoreFrameY", sf, function()
-        if changelogFrame and changelogFrame:IsShown() then
-            sf:SetPoint("TOPLEFT", changelogFrame, "BOTTOMLEFT", 0, -4)
-        elseif configFrame then
+        if configFrame then
             sf:SetPoint("TOPLEFT", configFrame, "TOPRIGHT", 4, 0)
         else
             sf:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -20, -200)
