@@ -4,6 +4,11 @@
 ]]
 
 LOXX_CHANGELOG = [[
+|cFFFFD100v1.5.5.2|r
+• Sync: your spec is now included when syncing with group members
+• New option: enable or disable broadcasting your kick data to the group
+• Peer-to-peer sync protocol now supports full spec identification
+
 |cFFFFD100v1.5.5.1|r
 • Kick Rotation Manager — automatically determines who should interrupt next
 • NEXT indicator on bars — green ▶ marks the next kicker in rotation

@@ -46,7 +46,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.5.5.1"
+local LOXX_VERSION = "1.5.5.2"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -173,6 +173,7 @@ local DEFAULTS = {
     ccConfigFrameY    = nil,
     showNextIndicator      = true,   -- show NEXT badge on kick rotation bars
     showEstimatedIndicator = true,   -- show ~ badge on bars without LOXX addon
+    enableBroadcast        = true,   -- broadcast own kick/CC data to group (LOXXINT protocol)
 }
 
 ------------------------------------------------------------
@@ -657,6 +658,10 @@ end
 local function SendLOXX(msg)
     -- Don't send when solo: PARTY/INSTANCE_CHAT would print "You are not in a group."
     if not IsInGroup() then return end
+    -- Respect user's broadcast preference (can be disabled in /loxx config).
+    -- Always allow HELLO and REQ_STATE so peers can still see us.
+    local isDiscovery = (msg == "HELLO" or msg == "REQ_STATE")
+    if not isDiscovery and db and db.enableBroadcast == false then return end
     -- Pick the correct channel BEFORE sending to avoid system error messages.
     -- PARTY works outside instances; INSTANCE_CHAT works inside M+/raids.
     local inInstance = IsInInstance()
@@ -704,11 +709,14 @@ local function AnnounceJoin()
     lastAnnounce = now
     ReadMyBaseCd()
     local cd = myBaseCd or (ALL_INTERRUPTS[mySpellID] and ALL_INTERRUPTS[mySpellID].cd) or 15
-    -- Append addon version so peers can identify protocol capabilities.
-    -- Field is optional and ignored by older versions (backward-compatible).
-    local joinMsg = "JOIN:" .. myClass .. ":" .. mySpellID .. ":" .. cd .. ":" .. LOXX_VERSION
+    -- Append addon version + specID so peers can identify protocol capabilities and spec.
+    -- Fields are optional and ignored by older versions (backward-compatible).
+    local specID = 0
+    local ok_spec, sid = pcall(GetSpecializationInfo, GetSpecialization and GetSpecialization() or 0)
+    if ok_spec and tonumber(sid) then specID = tonumber(sid) end
+    local joinMsg = "JOIN:" .. myClass .. ":" .. mySpellID .. ":" .. cd .. ":" .. LOXX_VERSION .. ":" .. specID
     SendLOXX(joinMsg)
-    DLog("JOIN", "SENT cls=" .. tostring(myClass) .. " spellID=" .. tostring(mySpellID) .. " cd=" .. cd .. " ver=" .. LOXX_VERSION)
+    DLog("JOIN", "SENT cls=" .. tostring(myClass) .. " spellID=" .. tostring(mySpellID) .. " cd=" .. cd .. " ver=" .. LOXX_VERSION .. " spec=" .. specID)
     if LoxxRotation then LoxxRotation.UpdateRoster(partyAddonUsers, myName) end
 end
 
@@ -752,6 +760,7 @@ local function OnAddonMessage(prefix, message, channel, sender)
         local spellID = tonumber(parts[3])
         local baseCd = tonumber(parts[4])
         local peerVersion = parts[5] -- optional, absent in older versions
+        local peerSpecID  = tonumber(parts[6]) -- optional, added in 1.5.5.2
         if cls and CLASS_COLORS[cls] and spellID and ALL_INTERRUPTS[spellID] then
             local isNew = (partyAddonUsers[shortName] == nil)
             partyAddonUsers[shortName] = partyAddonUsers[shortName] or {}
@@ -759,6 +768,9 @@ local function OnAddonMessage(prefix, message, channel, sender)
             partyAddonUsers[shortName].spellID = spellID
             partyAddonUsers[shortName].cdEnd = partyAddonUsers[shortName].cdEnd or 0
             partyAddonUsers[shortName].addonVersion = peerVersion -- nil for old clients
+            if peerSpecID and peerSpecID > 0 then
+                partyAddonUsers[shortName].specID = peerSpecID
+            end
             -- Guard against GCD-corrupted baseCd (< 5s) — same root cause as ReadMyBaseCd.
             -- No real interrupt has a base CD under 5s (Wind Shear = 12s is the shortest).
             if baseCd and baseCd >= 5 then
@@ -768,7 +780,8 @@ local function OnAddonMessage(prefix, message, channel, sender)
                 .. " cls=" .. tostring(cls)
                 .. " spellID=" .. tostring(spellID)
                 .. " baseCd=" .. tostring(baseCd)
-                .. " ver=" .. tostring(peerVersion or "old"))
+                .. " ver=" .. tostring(peerVersion or "old")
+                .. " spec=" .. tostring(peerSpecID or 0))
             SetDisplayDirty()
             AnnounceJoin()
         else
@@ -3112,6 +3125,8 @@ local function CreateConfigPanel()
     CreateCheckbox(configFrame, "Show NEXT indicator", R_CBX1, yR, "showNextIndicator", UpdateDisplay)
     yR = yR - 28
     CreateCheckbox(configFrame, "Show estimated (~) badge", R_CBX1, yR, "showEstimatedIndicator", UpdateDisplay)
+    yR = yR - 28
+    CreateCheckbox(configFrame, "Broadcast my kick data to group", R_CBX1, yR, "enableBroadcast")
 
     -- History limit dropdown
     yR = yR - 48
