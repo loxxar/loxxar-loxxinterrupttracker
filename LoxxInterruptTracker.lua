@@ -46,7 +46,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.5.5.12"
+local LOXX_VERSION = "1.5.5.13"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -1177,6 +1177,13 @@ local function AutoRegisterPartyByClass()
                             print("|cFF00DDDD[SPY]|r Auto-registered " ..
                                 name .. " (" .. cls .. ") " .. kickInfo.name .. " CD=" .. kickInfo.cd)
                         end
+                        -- For classes where spec determines kick availability, queue
+                        -- inspect immediately so SPEC_NO_INTERRUPT can remove them if needed.
+                        if (cls == "DRUID" or cls == "PALADIN" or cls == "PRIEST" or cls == "EVOKER")
+                            and not inspectedPlayers[name] then
+                            table.insert(inspectQueue, u)
+                            C_Timer.After(0.1, ProcessInspectQueue)
+                        end
                     end
                 end
             end
@@ -1238,6 +1245,22 @@ local function ScanInspectTalents(unit)
         if spyMode then
             print("|cFF00DDDD[SPY]|r " .. name ..
                 " (MONK) specID unavailable, power type not mana → assuming WW/BM, keeping")
+        end
+    end
+    -- Fallback when specID=0 (API unavailable): use group role to exclude healers
+    -- from classes that lose their interrupt as healer (Druid, Paladin, Priest, Evoker).
+    if (not specID or specID == 0) and info.class and not HEALER_KEEPS_KICK[info.class] then
+        local role = UnitGroupRolesAssigned(unit)
+        if role == "HEALER" then
+            partyAddonUsers[name] = nil
+            inspectedPlayers[name] = true
+            noInterruptPlayers[name] = true
+            DLog("SPEC", name .. " specID=0 but role=HEALER → removed from tracking")
+            if spyMode then
+                print("|cFF00DDDD[SPY]|r " .. name ..
+                    " (" .. info.class .. ") specID unavailable but role=HEALER → removed")
+            end
+            return
         end
     end
 

@@ -1,3 +1,8 @@
+v1.5.5.13
+• Fix: healer spec detection now uses group role as fallback when API returns specID=0 (Midnight 12.0 reliability improvement)
+• Fix: Druid, Paladin, Priest, Evoker now queued for immediate inspect on join to prevent false positive tracking as interrupt-capable
+• CC Tracker config panel now opens sticky to the exterior right of the Settings window
+
 v1.4.3
 • Fix: NewMissToken nil error when casting an interrupt
 
