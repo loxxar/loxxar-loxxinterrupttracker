@@ -11,8 +11,9 @@ LoxxL = {
     ["TITLE"]            = "Interrupts",
     ["NO_KICK"]          = "No kick available",
     ["READY"]            = "READY",
-    ["TOOLTIP_CD"]       = "CD: %.1fs / %.0fs",
-    ["TOOLTIP_READY"]    = "READY",
+    ["TOOLTIP_CD"]        = "CD: %.1fs / %.0fs",
+    ["TOOLTIP_READY"]     = "READY",
+    ["TOOLTIP_ESTIMATED"] = "(estimated — no addon)",
 
     -- ── Alert band ─────────────────────────────────────────────────
     ["ALERT_ONE_READY"]  = "%s — READY",
@@ -113,8 +114,9 @@ LoxxL = {
     ["KA_P1_LABEL"]      = "KICK NOW",
     ["KA_P2_LABEL"]      = "KICK",
     ["KA_P3_LABEL"]      = "OPTIONAL",
-    ["KA_KICKER"]        = "→ %s",
+    ["KA_KICKER"]        = "> %s",
     ["KA_MOVE_HINT"]     = "Drag to reposition",
+    ["CB_SHOW_NEXT"]     = "Show > (next kicker)",
 }
 
 -- ── French ─────────────────────────────────────────────────────────
@@ -190,8 +192,21 @@ if locale == "frFR" then
     T["KA_P1_LABEL"]     = "KICK MAINTENANT"
     T["KA_P2_LABEL"]     = "KICK"
     T["KA_P3_LABEL"]     = "OPTIONNEL"
-    T["KA_KICKER"]       = "→ %s"
+    T["KA_KICKER"]       = "> %s"
     T["KA_MOVE_HINT"]    = "Glisser pour déplacer"
+    T["CB_SHOW_NEXT"]    = "Afficher > (prochain kicker)"
+    T["TOOLTIP_ESTIMATED"]  = "(estimé — pas d'addon)"
+    T["CB_ALERT_CAST"]      = "Alerte sur cast interruptible"
+    T["DD_MAX_HISTORY"]     = "Limite de l'historique : "
+    T["DD_MAX_HISTORY_TIP"] = "Runs sauvegardés — les plus anciens sont supprimés quand la limite est atteinte"
+    T["ALERT_LOCKED"]       = "BLOQUÉ : %s (%.0fs)"
+    T["ALERT_NO_KICK_CAST"] = "!! AUCUN KICK — %s en train de caster !!"
+    T["SCORE_TITLE"]        = "Score de kicks (total)"
+    T["SCORE_RATIO"]        = "Ratio"
+    T["BTN_CLEAR"]          = "Effacer"
+    T["CC_TITLE"]           = "Suivi des CC"
+    T["CC_NO_CC"]           = "Aucun CC disponible"
+    T["CB_SHOW_CC"]         = "Afficher le suivi CC"
 end
 
 -- ── German ──────────────────────────────────────────────────────────
@@ -267,8 +282,21 @@ if locale == "deDE" then
     T["KA_P1_LABEL"]     = "JETZT UNTERBRECHEN"
     T["KA_P2_LABEL"]     = "UNTERBRECHEN"
     T["KA_P3_LABEL"]     = "OPTIONAL"
-    T["KA_KICKER"]       = "→ %s"
+    T["KA_KICKER"]       = "> %s"
     T["KA_MOVE_HINT"]    = "Ziehen zum Verschieben"
+    T["CB_SHOW_NEXT"]    = "> (nächster Kicker) anzeigen"
+    T["TOOLTIP_ESTIMATED"]  = "(geschätzt — kein Addon)"
+    T["CB_ALERT_CAST"]      = "Alarm bei unterbrechbarem Zauber"
+    T["DD_MAX_HISTORY"]     = "Verlaufslimit: "
+    T["DD_MAX_HISTORY_TIP"] = "Gespeicherte Runs — ältere werden gelöscht wenn das Limit erreicht ist"
+    T["ALERT_LOCKED"]       = "GESPERRT: %s (%.0fs)"
+    T["ALERT_NO_KICK_CAST"] = "!! KEIN KICK — %s wirkt Zauber !!"
+    T["SCORE_TITLE"]        = "Gesamte Kick-Punkte"
+    T["SCORE_RATIO"]        = "Verhältnis"
+    T["BTN_CLEAR"]          = "Löschen"
+    T["CC_TITLE"]           = "CC-Überwachung"
+    T["CC_NO_CC"]           = "Kein CC verfügbar"
+    T["CB_SHOW_CC"]         = "CC-Tracker anzeigen"
 end
 
 -- ── Italian ─────────────────────────────────────────────────────────
@@ -344,8 +372,21 @@ if locale == "itIT" then
     T["KA_P1_LABEL"]     = "INTERROMPI ORA"
     T["KA_P2_LABEL"]     = "INTERROMPI"
     T["KA_P3_LABEL"]     = "OPZIONALE"
-    T["KA_KICKER"]       = "→ %s"
+    T["KA_KICKER"]       = "> %s"
     T["KA_MOVE_HINT"]    = "Trascina per spostare"
+    T["CB_SHOW_NEXT"]    = "Mostra > (prossimo kicker)"
+    T["TOOLTIP_ESTIMATED"]  = "(stimato — nessun addon)"
+    T["CB_ALERT_CAST"]      = "Avviso per incantesimi interrompibili"
+    T["DD_MAX_HISTORY"]     = "Limite cronologia: "
+    T["DD_MAX_HISTORY_TIP"] = "Run salvate — quelle più vecchie vengono eliminate al raggiungimento del limite"
+    T["ALERT_LOCKED"]       = "BLOCCATO: %s (%.0fs)"
+    T["ALERT_NO_KICK_CAST"] = "!! NESSUN KICK — %s sta lanciando !!"
+    T["SCORE_TITLE"]        = "Punteggio kick totale"
+    T["SCORE_RATIO"]        = "Ratio"
+    T["BTN_CLEAR"]          = "Cancella"
+    T["CC_TITLE"]           = "Monitor CC"
+    T["CC_NO_CC"]           = "Nessun CC disponibile"
+    T["CB_SHOW_CC"]         = "Mostra monitor CC"
 end
 
 -- ── Spanish ─────────────────────────────────────────────────────────
@@ -421,8 +462,21 @@ if locale == "esES" or locale == "esMX" then
     T["KA_P1_LABEL"]     = "INTERRUMPIR AHORA"
     T["KA_P2_LABEL"]     = "INTERRUMPIR"
     T["KA_P3_LABEL"]     = "OPCIONAL"
-    T["KA_KICKER"]       = "→ %s"
+    T["KA_KICKER"]       = "> %s"
     T["KA_MOVE_HINT"]    = "Arrastra para mover"
+    T["CB_SHOW_NEXT"]    = "Mostrar > (próximo kicker)"
+    T["TOOLTIP_ESTIMATED"]  = "(estimado — sin addon)"
+    T["CB_ALERT_CAST"]      = "Alerta en lanzamiento interrumpible"
+    T["DD_MAX_HISTORY"]     = "Límite de historial: "
+    T["DD_MAX_HISTORY_TIP"] = "Runs guardados — los más antiguos se eliminan al alcanzar el límite"
+    T["ALERT_LOCKED"]       = "BLOQUEADO: %s (%.0fs)"
+    T["ALERT_NO_KICK_CAST"] = "!! SIN KICK — ¡%s está lanzando !!"
+    T["SCORE_TITLE"]        = "Puntuación total de interrupciones"
+    T["SCORE_RATIO"]        = "Ratio"
+    T["BTN_CLEAR"]          = "Limpiar"
+    T["CC_TITLE"]           = "Monitor CC"
+    T["CC_NO_CC"]           = "Sin CC disponible"
+    T["CB_SHOW_CC"]         = "Mostrar monitor CC"
 end
 
 -- ── Taiwan ─────────────────────────────────────────────────────────
@@ -495,6 +549,32 @@ if locale == "zhTW" then
     T["CMD_HIST_CLEAR"]  = "運行歷史紀錄已清除。"
     T["CMD_LOG_CLEAR"]   = "錯誤報告已清除。"
     T["CMD_NO_LOGS"]     = "無錯誤的紀錄。"
+    T["SEC_ROTATION"]       = "輪換"
+    T["CB_ROTATION"]        = "啟用打斷輪換"
+    T["BTN_MANAGE_ROT"]     = "管理打斷輪換"
+    T["ROT_MAINTENANCE"]    = "維護中"
+    T["ROT_TITLE"]          = "打斷輪換"
+    T["ROT_RESET"]          = "重置"
+    T["ROT_SYNC"]           = "隊伍同步"
+    T["ROT_SYNCED"]         = "輪換順序已同步到隊伍。"
+    T["KA_P1_LABEL"]        = "立即打斷"
+    T["KA_P2_LABEL"]        = "打斷"
+    T["KA_P3_LABEL"]        = "可選"
+    T["KA_KICKER"]          = "> %s"
+    T["KA_MOVE_HINT"]       = "拖曳以移動"
+    T["CB_SHOW_NEXT"]       = "顯示 > (下一個踢人者)"
+    T["TOOLTIP_ESTIMATED"]  = "（估算—無插件）"
+    T["CB_ALERT_CAST"]      = "可打斷施法提醒"
+    T["DD_MAX_HISTORY"]     = "歷史限制: "
+    T["DD_MAX_HISTORY_TIP"] = "已儲存的Run — 超過限制後最舊的會被刪除"
+    T["ALERT_LOCKED"]       = "鎖定：%s (%.0f秒)"
+    T["ALERT_NO_KICK_CAST"] = "!! 無打斷 — %s 正在施法 !!"
+    T["SCORE_TITLE"]        = "全部打斷得分"
+    T["SCORE_RATIO"]        = "比率"
+    T["BTN_CLEAR"]          = "清除"
+    T["CC_TITLE"]           = "CC追蹤"
+    T["CC_NO_CC"]           = "無CC可用"
+    T["CB_SHOW_CC"]         = "顯示CC追蹤"
 end
 
 -- ── Korean ──────────────────────────────────────────────────────────
@@ -559,6 +639,32 @@ if locale == "koKR" then
     T["CMD_HIST_CLEAR"]  = "진행 기록 지워짐."
     T["CMD_LOG_CLEAR"]   = "오류 로그 지워짐."
     T["CMD_NO_LOGS"]     = "기록된 오류 없음."
+    T["SEC_ROTATION"]       = "로테이션"
+    T["CB_ROTATION"]        = "로테이션 활성화"
+    T["BTN_MANAGE_ROT"]     = "차단 로테이션 관리"
+    T["ROT_MAINTENANCE"]    = "점검 중"
+    T["ROT_TITLE"]          = "차단 로테이션"
+    T["ROT_RESET"]          = "초기화"
+    T["ROT_SYNC"]           = "파티 동기화"
+    T["ROT_SYNCED"]         = "파티와 로테이션 동기화 완료."
+    T["KA_P1_LABEL"]        = "지금 차단"
+    T["KA_P2_LABEL"]        = "차단"
+    T["KA_P3_LABEL"]        = "선택사항"
+    T["KA_KICKER"]          = "> %s"
+    T["KA_MOVE_HINT"]       = "드래그하여 이동"
+    T["CB_SHOW_NEXT"]       = "> (다음 차단자) 표시"
+    T["TOOLTIP_ESTIMATED"]  = "(추정 — 애드온 없음)"
+    T["CB_ALERT_CAST"]      = "차단 가능한 시전 알림"
+    T["DD_MAX_HISTORY"]     = "기록 한도: "
+    T["DD_MAX_HISTORY_TIP"] = "저장된 Run — 한도 초과 시 오래된 항목 삭제"
+    T["ALERT_LOCKED"]       = "잠김: %s (%.0f초)"
+    T["ALERT_NO_KICK_CAST"] = "!! 차단 없음 — %s 시전 중 !!"
+    T["SCORE_TITLE"]        = "전체 차단 점수"
+    T["SCORE_RATIO"]        = "비율"
+    T["BTN_CLEAR"]          = "지우기"
+    T["CC_TITLE"]           = "CC 추적"
+    T["CC_NO_CC"]           = "사용 가능한 CC 없음"
+    T["CB_SHOW_CC"]         = "CC 추적기 표시"
 end
 
 -- ── Japanese ─────────────────────────────────────────────────────────
@@ -623,6 +729,32 @@ if locale == "jaJA" then
     T["CMD_HIST_CLEAR"]  = "ラン履歴をクリアしました。"
     T["CMD_LOG_CLEAR"]   = "エラーログをクリアしました。"
     T["CMD_NO_LOGS"]     = "エラーの記録なし。"
+    T["SEC_ROTATION"]       = "ローテーション"
+    T["CB_ROTATION"]        = "ローテーション有効化"
+    T["BTN_MANAGE_ROT"]     = "割り込みローテーション管理"
+    T["ROT_MAINTENANCE"]    = "メンテナンス中"
+    T["ROT_TITLE"]          = "割り込みローテーション"
+    T["ROT_RESET"]          = "リセット"
+    T["ROT_SYNC"]           = "グループ同期"
+    T["ROT_SYNCED"]         = "ローテーションをグループと同期しました。"
+    T["KA_P1_LABEL"]        = "今すぐ割り込み"
+    T["KA_P2_LABEL"]        = "割り込み"
+    T["KA_P3_LABEL"]        = "任意"
+    T["KA_KICKER"]          = "> %s"
+    T["KA_MOVE_HINT"]       = "ドラッグして移動"
+    T["CB_SHOW_NEXT"]       = "> (次のキッカー) 表示"
+    T["TOOLTIP_ESTIMATED"]  = "(推定 — アドオンなし)"
+    T["CB_ALERT_CAST"]      = "割り込み可能キャスト時アラート"
+    T["DD_MAX_HISTORY"]     = "履歴上限: "
+    T["DD_MAX_HISTORY_TIP"] = "保存されたRun — 上限に達すると古いものが削除されます"
+    T["ALERT_LOCKED"]       = "ロック: %s (%.0f秒)"
+    T["ALERT_NO_KICK_CAST"] = "!! 割り込みなし — %s がキャスト中 !!"
+    T["SCORE_TITLE"]        = "全体割り込みスコア"
+    T["SCORE_RATIO"]        = "比率"
+    T["BTN_CLEAR"]          = "クリア"
+    T["CC_TITLE"]           = "CC追跡"
+    T["CC_NO_CC"]           = "使用可能なCCなし"
+    T["CB_SHOW_CC"]         = "CCトラッカーを表示"
 end
 
 -- ── Simplified Chinese ────────────────────────────────────────────────
@@ -687,6 +819,32 @@ if locale == "zhCN" then
     T["CMD_HIST_CLEAR"]  = "运行历史记录已清除。"
     T["CMD_LOG_CLEAR"]   = "错误日志已清除。"
     T["CMD_NO_LOGS"]     = "无错误记录。"
+    T["SEC_ROTATION"]       = "轮换"
+    T["CB_ROTATION"]        = "启用打断轮换"
+    T["BTN_MANAGE_ROT"]     = "管理打断轮换"
+    T["ROT_MAINTENANCE"]    = "维护中"
+    T["ROT_TITLE"]          = "打断轮换"
+    T["ROT_RESET"]          = "重置"
+    T["ROT_SYNC"]           = "队伍同步"
+    T["ROT_SYNCED"]         = "轮换顺序已同步到队伍。"
+    T["KA_P1_LABEL"]        = "立即打断"
+    T["KA_P2_LABEL"]        = "打断"
+    T["KA_P3_LABEL"]        = "可选"
+    T["KA_KICKER"]          = "> %s"
+    T["KA_MOVE_HINT"]       = "拖拽以移动"
+    T["CB_SHOW_NEXT"]       = "显示 > (下一个踢人者)"
+    T["TOOLTIP_ESTIMATED"]  = "（估算—无插件）"
+    T["CB_ALERT_CAST"]      = "可打断施法提醒"
+    T["DD_MAX_HISTORY"]     = "历史限制: "
+    T["DD_MAX_HISTORY_TIP"] = "已保存的Run — 超过限制后最旧的会被删除"
+    T["ALERT_LOCKED"]       = "锁定：%s (%.0f秒)"
+    T["ALERT_NO_KICK_CAST"] = "!! 无打断 — %s 正在施法 !!"
+    T["SCORE_TITLE"]        = "全部打断得分"
+    T["SCORE_RATIO"]        = "比率"
+    T["BTN_CLEAR"]          = "清除"
+    T["CC_TITLE"]           = "CC追踪"
+    T["CC_NO_CC"]           = "无CC可用"
+    T["CB_SHOW_CC"]         = "显示CC追踪"
 end
 
 -- ── Russian ──────────────────────────────────────────────────────────
@@ -762,6 +920,19 @@ if locale == "ruRU" then
     T["KA_P1_LABEL"]     = "ПРЕРВАТЬ СЕЙЧАС"
     T["KA_P2_LABEL"]     = "ПРЕРВАТЬ"
     T["KA_P3_LABEL"]     = "ПО ЖЕЛАНИЮ"
-    T["KA_KICKER"]       = "→ %s"
+    T["KA_KICKER"]       = "> %s"
     T["KA_MOVE_HINT"]    = "Перетащить для перемещения"
+    T["CB_SHOW_NEXT"]    = "Показать > (следующий кикер)"
+    T["TOOLTIP_ESTIMATED"]  = "(оценка — нет аддона)"
+    T["CB_ALERT_CAST"]      = "Сигнал при прерываемом заклинании"
+    T["DD_MAX_HISTORY"]     = "Лимит истории: "
+    T["DD_MAX_HISTORY_TIP"] = "Сохранённые заходы — старые удаляются при превышении лимита"
+    T["ALERT_LOCKED"]       = "ЗАБЛОКИРОВАНО: %s (%.0fс)"
+    T["ALERT_NO_KICK_CAST"] = "!! НЕТ ПРЕРЫВАНИЯ — %s читает заклинание !!"
+    T["SCORE_TITLE"]        = "Общий счёт прерываний"
+    T["SCORE_RATIO"]        = "Соотношение"
+    T["BTN_CLEAR"]          = "Очистить"
+    T["CC_TITLE"]           = "Отслеживание CC"
+    T["CC_NO_CC"]           = "Нет доступных CC"
+    T["CB_SHOW_CC"]         = "Показать трекер CC"
 end

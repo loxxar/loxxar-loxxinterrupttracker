@@ -4,3 +4,4 @@ review_config.html
 *.swp
 *.swo
 Thumbs.db
+build_release.py

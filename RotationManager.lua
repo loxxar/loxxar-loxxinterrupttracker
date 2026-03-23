@@ -134,7 +134,7 @@ function LoxxRotation.MarkNextKicker(bars, barCount, partyAddonUsers, myName, my
         local bar = bars[i]
         if bar and bar.nameText and bar.ttPlayerName then
             if nextKicker and bar.ttPlayerName == nextKicker then
-                bar.nameText:SetText("|cFF26FF73▶|r " .. bar.ttPlayerName)
+                bar.nameText:SetText("|cFF26FF73>|r " .. bar.ttPlayerName)
             else
                 bar.nameText:SetText(bar.ttPlayerName)
             end
