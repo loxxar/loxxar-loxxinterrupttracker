@@ -46,7 +46,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.5.5.14"
+local LOXX_VERSION = "1.5.5.16"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -1523,7 +1523,7 @@ local function ScanInspectTalents(unit)
     end
 end
 
-local function ProcessInspectQueue()
+ProcessInspectQueue = function()
     if inspectBusy then return end
     while #inspectQueue > 0 do
         local unit = table.remove(inspectQueue, 1)
@@ -3735,10 +3735,14 @@ local function SetupSlash()
                     local slice = {}
                     for i = startIdx, count do
                         local v = filtered[i]
-                        -- type() returns "string" for WoW secret/tainted values too;
-                        -- test actual concatenation to ensure v is a plain string.
-                        if type(v) == "string" and (pcall(function() return v .. "" end)) then
-                            slice[#slice + 1] = v
+                        -- WoW may return "string" from type() for tainted/secret values,
+                        -- but table.concat (C function) rejects them. Store the safe copy
+                        -- produced by concatenation, not the original reference.
+                        if type(v) == "string" then
+                            local ok, safe = pcall(function() return v .. "" end)
+                            if ok and type(safe) == "string" then
+                                slice[#slice + 1] = safe
+                            end
                         end
                     end
                     local ok2, result = pcall(table.concat, slice, "\n")
@@ -5201,7 +5205,7 @@ RegisterPartyWatchers = function()
                 end
 
                 -- In Midnight, eSpellID is a secret value and cannot be used
-                -- as a table index. Detection is handled entirely by
+                -- as a table index. Interrupt detection is handled entirely by
                 -- UNIT_SPELLCAST_INTERRUPTED correlation (timestamp above).
                 do
                     local info = cleanName and partyAddonUsers[cleanName]
@@ -5210,6 +5214,41 @@ RegisterPartyWatchers = function()
                     if spyMode then
                         local suffix = skipped and " — SKIPPED (kick on CD)" or " — timestamp stored for correlation"
                         print("|cFF00DDDD[SPY]|r SUCCEEDED " .. cleanUnit .. " (" .. tostring(cleanName) .. ")" .. suffix)
+                    end
+                end
+
+                -- CC Tracker: detect party CC casts without requiring the addon on peers.
+                -- eSpellID is a "secret" tainted value in Midnight 12.0 and cannot be used
+                -- as a table key, but equality comparison (==) with literal integers works.
+                if cleanName and UnitIsPlayer(cleanUnit) then
+                    for ccSpellID, ccData in pairs(CC_SPELLS) do
+                        if eSpellID == ccSpellID then
+                            local ccCd = ccData.cd or 2
+                            if not ccAddonUsers[cleanName] then
+                                local ok, tex = pcall(C_Spell.GetSpellTexture, ccSpellID)
+                                ccAddonUsers[cleanName] = {
+                                    class     = ccData.class,
+                                    spellID   = ccSpellID,
+                                    spellName = ccData.name,
+                                    baseCd    = ccCd,
+                                    cdEnd     = 0,
+                                    icon      = ok and tex or nil,
+                                }
+                            end
+                            local newEnd = GetTime() + ccCd
+                            if newEnd > (ccAddonUsers[cleanName].cdEnd or 0) then
+                                ccAddonUsers[cleanName].cdEnd     = newEnd
+                                ccAddonUsers[cleanName].spellID   = ccSpellID
+                                ccAddonUsers[cleanName].spellName = ccData.name
+                                ccDirty = true
+                                DLog("CC_PARTY", cleanName .. " " .. ccData.name .. " cd=" .. ccCd)
+                                if spyMode then
+                                    print("|cFF00DDDD[SPY]|r CC_PARTY " .. cleanName ..
+                                        " → " .. ccData.name .. " [" .. ccData.dr .. "] cd=" .. ccCd)
+                                end
+                            end
+                            break
+                        end
                     end
                 end
             end)
