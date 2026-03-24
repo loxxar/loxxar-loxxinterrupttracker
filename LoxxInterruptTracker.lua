@@ -46,7 +46,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.5.5.13"
+local LOXX_VERSION = "1.5.5.14"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -594,7 +594,9 @@ local function DLog(cat, msg)
     local ok, entry = pcall(function()
         return "[" .. date("%H:%M:%S") .. "][" .. cat .. "] " .. tostring(msg)
     end)
-    if ok and type(entry) == "string" then
+    -- type() returns "string" even for WoW "secret"/tainted values; test concat instead
+    local canConcat = ok and (pcall(function() return entry .. "" end))
+    if canConcat then
         table.insert(loxxDungeonLog, entry)
         if #loxxDungeonLog > DUNGEON_LOG_MAX then
             table.remove(loxxDungeonLog, 1)
@@ -3733,13 +3735,14 @@ local function SetupSlash()
                     local slice = {}
                     for i = startIdx, count do
                         local v = filtered[i]
-                        -- Guard against tainted/secret values (WoW may mark entries opaque
-                        -- when DLog fires from a protected context). Skip non-strings silently.
-                        if type(v) == "string" then
+                        -- type() returns "string" for WoW secret/tainted values too;
+                        -- test actual concatenation to ensure v is a plain string.
+                        if type(v) == "string" and (pcall(function() return v .. "" end)) then
                             slice[#slice + 1] = v
                         end
                     end
-                    eb:SetText(table.concat(slice, "\n"))
+                    local ok2, result = pcall(table.concat, slice, "\n")
+                    eb:SetText(ok2 and result or "(log display error — tainted entries skipped)")
                     eb:SetWidth(sf:GetWidth())
                     local label = filter or "ALL"
                     local shown = math.min(count, DISPLAY_MAX)
