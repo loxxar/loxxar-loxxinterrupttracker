@@ -5,3 +5,8 @@ review_config.html
 *.swo
 Thumbs.db
 build_release.py
+CLAUDE.md
+check_patterns.sh
+*.bak*
+preview/
+preview_layout.py
