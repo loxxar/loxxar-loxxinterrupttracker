@@ -5,3 +5,8 @@ ignore:
   - pkgmeta.yaml
   - CURSE_CHANGELOG.txt
   - RELEASE.md
+  - CLAUDE.md
+  - check_patterns.sh
+  - releases
+  - preview
+  - preview_layout.py
