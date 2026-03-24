@@ -46,7 +46,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.5.5.16"
+local LOXX_VERSION = "1.5.5.17"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -5095,6 +5095,56 @@ mobDeathFrame:SetScript("OnEvent", function(_, _, unit)
     activeChannels[unit] = nil
 end)
 
+-- CC Tracker: detect party CC casts via UNIT_AURA on mob units.
+-- In Midnight 12.0, eSpellID from UNIT_SPELLCAST_SUCCEEDED is a "secret" tainted
+-- value — neither table indexing nor == comparison work on it.
+-- C_UnitAuras.GetAuraDataByIndex returns a regular (non-tainted) spellId because
+-- it is a direct API call, not an event argument.  sourceUnit identifies the caster.
+local function DetectCCAuras(unit)
+    if not (C_UnitAuras and C_UnitAuras.GetAuraDataByIndex) then return end
+    local i = 1
+    while i <= 40 do
+        local ok, auraData = pcall(C_UnitAuras.GetAuraDataByIndex, unit, i, "HARMFUL")
+        if not ok or not auraData then break end
+        local spellId   = auraData.spellId
+        local ccInfo    = spellId and CC_SPELLS[spellId]
+        if ccInfo and auraData.sourceUnit then
+            local sourceName = UnitName(auraData.sourceUnit)
+            if sourceName and sourceName ~= myName then
+                local entry = ccAddonUsers[sourceName]
+                if entry then
+                    local ccCd   = ccInfo.cd or 2
+                    local newEnd = GetTime() + ccCd
+                    if newEnd > (entry.cdEnd or 0) then
+                        entry.cdEnd     = newEnd
+                        entry.spellID   = spellId
+                        entry.spellName = ccInfo.name
+                        ccDirty = true
+                        DLog("CC_AURA", sourceName .. " " .. ccInfo.name
+                            .. " cd=" .. ccCd .. " via " .. unit)
+                        if spyMode then
+                            print("|cFF00DDDD[SPY]|r CC_AURA " .. sourceName
+                                .. " → " .. ccInfo.name
+                                .. " [" .. ccInfo.dr .. "] cd=" .. ccCd)
+                        end
+                    end
+                end
+            end
+        end
+        i = i + 1
+    end
+end
+
+-- CC aura frames: target + focus + boss1-5 (always active)
+local ccAuraUnits = { "target", "focus", "boss1", "boss2", "boss3", "boss4", "boss5" }
+local ccAuraFrames = {}
+for _, au in ipairs(ccAuraUnits) do
+    local f = CreateFrame("Frame")
+    f:RegisterUnitEvent("UNIT_AURA", au)
+    f:SetScript("OnEvent", function(_, _, unit) DetectCCAuras(unit) end)
+    ccAuraFrames[au] = f
+end
+
 -- Nameplate interrupt tracking: pre-create all 40 frames at load time (no leaks)
 -- Avoids creating/destroying frames during gameplay, which was inefficient.
 local nameplateCastFrames = {}
@@ -5104,6 +5154,7 @@ for i = 1, 40 do
     nameplateCastFrames[unit]:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", unit)
     nameplateCastFrames[unit]:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", unit)
     nameplateCastFrames[unit]:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", unit)
+    nameplateCastFrames[unit]:RegisterUnitEvent("UNIT_AURA", unit)
     nameplateCastFrames[unit]:SetScript("OnEvent", function(_, event, eUnit)
         if event == "UNIT_SPELLCAST_INTERRUPTED" then
             OnMobInterrupted(eUnit)
@@ -5111,6 +5162,8 @@ for i = 1, 40 do
             OnMobChannelStart(eUnit)
         elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" then
             OnMobChannelStop(eUnit)
+        elseif event == "UNIT_AURA" then
+            DetectCCAuras(eUnit)
         end
     end)
 end
@@ -5217,40 +5270,9 @@ RegisterPartyWatchers = function()
                     end
                 end
 
-                -- CC Tracker: detect party CC casts without requiring the addon on peers.
-                -- eSpellID is a "secret" tainted value in Midnight 12.0 and cannot be used
-                -- as a table key, but equality comparison (==) with literal integers works.
-                if cleanName and UnitIsPlayer(cleanUnit) then
-                    for ccSpellID, ccData in pairs(CC_SPELLS) do
-                        if eSpellID == ccSpellID then
-                            local ccCd = ccData.cd or 2
-                            if not ccAddonUsers[cleanName] then
-                                local ok, tex = pcall(C_Spell.GetSpellTexture, ccSpellID)
-                                ccAddonUsers[cleanName] = {
-                                    class     = ccData.class,
-                                    spellID   = ccSpellID,
-                                    spellName = ccData.name,
-                                    baseCd    = ccCd,
-                                    cdEnd     = 0,
-                                    icon      = ok and tex or nil,
-                                }
-                            end
-                            local newEnd = GetTime() + ccCd
-                            if newEnd > (ccAddonUsers[cleanName].cdEnd or 0) then
-                                ccAddonUsers[cleanName].cdEnd     = newEnd
-                                ccAddonUsers[cleanName].spellID   = ccSpellID
-                                ccAddonUsers[cleanName].spellName = ccData.name
-                                ccDirty = true
-                                DLog("CC_PARTY", cleanName .. " " .. ccData.name .. " cd=" .. ccCd)
-                                if spyMode then
-                                    print("|cFF00DDDD[SPY]|r CC_PARTY " .. cleanName ..
-                                        " → " .. ccData.name .. " [" .. ccData.dr .. "] cd=" .. ccCd)
-                                end
-                            end
-                            break
-                        end
-                    end
-                end
+                -- NOTE: eSpellID is a "secret" tainted value in Midnight 12.0.
+                -- Neither table indexing NOR == comparison work on it.
+                -- CC detection is handled via UNIT_AURA on mob units below.
             end)
         end
     end
