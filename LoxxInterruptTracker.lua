@@ -2654,7 +2654,7 @@ local function CreateConfigPanel()
     end
 
     local FW   = 520
-    local FH   = 590
+    local FH   = 630
     local HDR  = 86
     local TABH = 28
     local FOOT = 70
@@ -2662,7 +2662,6 @@ local function CreateConfigPanel()
     local GAP  = 10
     local CW   = math.floor((FW - 2 * PAD - GAP) / 2)
     local SLW  = CW - 4
-    local DDW  = CW - 4
     local CX1  = PAD
     local CX2  = PAD + CW + GAP
 
@@ -2701,14 +2700,14 @@ local function CreateConfigPanel()
     local hdr = configFrame:CreateTexture(nil, "BACKGROUND", nil, 2)
     hdr:SetTexture(FLAT_TEX)
     hdr:SetVertexColor(0.12, 0.09, 0.02, 1)
-    hdr:SetPoint("TOPLEFT", 0, -22)
+    hdr:SetPoint("TOPLEFT",  0, -22)
     hdr:SetPoint("TOPRIGHT", 0, -22)
     hdr:SetHeight(64)
 
     local hdrLineTop = configFrame:CreateTexture(nil, "BORDER")
     hdrLineTop:SetTexture(FLAT_TEX)
     hdrLineTop:SetVertexColor(0.87, 0.73, 0.37, 0.75)
-    hdrLineTop:SetPoint("TOPLEFT", 0, -22)
+    hdrLineTop:SetPoint("TOPLEFT",  0, -22)
     hdrLineTop:SetPoint("TOPRIGHT", 0, -22)
     hdrLineTop:SetHeight(1)
 
@@ -2745,11 +2744,10 @@ local function CreateConfigPanel()
     local tabNames = { "INTERRUPT", "CC TRACKER", "OPTIONS" }
     local TW = math.floor(FW / #tabNames)
 
-    -- Tab bar background
     local tabBarBg = configFrame:CreateTexture(nil, "BACKGROUND", nil, 1)
     tabBarBg:SetTexture(FLAT_TEX)
     tabBarBg:SetVertexColor(0.09, 0.08, 0.05, 1)
-    tabBarBg:SetPoint("TOPLEFT", 0, -HDR)
+    tabBarBg:SetPoint("TOPLEFT",  0, -HDR)
     tabBarBg:SetPoint("TOPRIGHT", 0, -HDR)
     tabBarBg:SetHeight(TABH)
 
@@ -2780,7 +2778,8 @@ local function CreateConfigPanel()
             sep:SetTexture(FLAT_TEX)
             sep:SetVertexColor(0.45, 0.38, 0.22, 0.4)
             sep:SetWidth(1)
-            sep:SetPoint("TOPRIGHT", 0, 0); sep:SetPoint("BOTTOMRIGHT", 0, 0)
+            sep:SetPoint("TOPRIGHT",    0, 0)
+            sep:SetPoint("BOTTOMRIGHT", 0, 0)
         end
 
         local idx = i
@@ -2788,18 +2787,16 @@ local function CreateConfigPanel()
         tabBtns[i] = btn
     end
 
-    -- Tab bottom border
     local tabLine = configFrame:CreateTexture(nil, "BORDER")
     tabLine:SetTexture(FLAT_TEX)
     tabLine:SetVertexColor(0.45, 0.38, 0.22, 0.55)
     tabLine:SetHeight(1)
-    tabLine:SetPoint("TOPLEFT", 0, -(HDR + TABH))
+    tabLine:SetPoint("TOPLEFT",  0, -(HDR + TABH))
     tabLine:SetPoint("TOPRIGHT", 0, -(HDR + TABH))
 
-    -- One content frame per tab
     for i = 1, 3 do
         local f = CreateFrame("Frame", nil, configFrame)
-        f:SetPoint("TOPLEFT", 0, -(HDR + TABH + 1))
+        f:SetPoint("TOPLEFT",     0, -(HDR + TABH + 1))
         f:SetPoint("BOTTOMRIGHT", 0, FOOT)
         tabFrames[i] = f
     end
@@ -2813,27 +2810,32 @@ local function CreateConfigPanel()
         rule:SetTexture(FLAT_TEX)
         rule:SetVertexColor(0.45, 0.38, 0.22, 0.35)
         rule:SetHeight(1)
-        rule:SetPoint("LEFT", lbl, "RIGHT", 6, 0)
+        rule:SetPoint("LEFT",     lbl, "RIGHT",    6, 0)
         rule:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -PAD, y - 7)
         return lbl
     end
 
-    local function Sl(parent, name, x, y, w, dbkey, mn, mx, step, fmt, onchange)
+    -- Sl: generic slider. fmt is the L["SL_*"] format string.
+    -- vFmt: optional function(v)->displayVal (e.g. *100 for opacity percent)
+    local function Sl(parent, name, x, y, w, dbkey, mn, mx, step, fmt, onchange, vFmt)
         local s = MakeSlider("LOXX_" .. name, parent)
         s:SetPoint("TOPLEFT", x, y)
         s:SetSize(w, 28)
         s:SetMinMaxValues(mn, mx)
         s:SetValueStep(step)
         s:SetObeyStepOnDrag(true)
+        local function showVal(v)
+            return string.format(fmt, vFmt and vFmt(v) or v)
+        end
         local v = math.max(mn, math.min(mx, db[dbkey] or mn))
         s:SetValue(v)
-        s.Text:SetText(string.format(fmt, v))
+        s.Text:SetText(showVal(v))
         s.Low:SetText(tostring(mn))
         s.High:SetText(tostring(mx))
         s:SetScript("OnValueChanged", function(self, val)
             val = math.floor(val / step + 0.5) * step
             db[dbkey] = val
-            self.Text:SetText(string.format(fmt, val))
+            self.Text:SetText(showVal(val))
             if onchange then onchange(val) end
         end)
         return s
@@ -2843,63 +2845,72 @@ local function CreateConfigPanel()
         return CreatePresetDropdownControl(parent, name, x, y, w, presets, getIdx, onSel, prefix)
     end
 
+    local SLR  = 52   -- slider row height (28 slider + 14 Low/High + ~10 gap)
+    local DDR  = 44   -- dropdown row height
+    local CBR  = 27   -- checkbox row height
+    local SECH = 24   -- section label height
+    local DDW  = 200  -- single-col dropdown inner width (fits safely in CW=237)
+    local DDFW = 440  -- full-width dropdown inner width
+
     -- ── TAB 1: INTERRUPT ─────────────────────────────────────────
     local t1 = tabFrames[1]
-    local y1 = -8
+    local y = -10
 
-    SecLabel(t1, "APPARENCE", CX1, y1); y1 = y1 - 22
-    Sl(t1, "Slider_alpha",  CX1, y1, SLW, "alpha",     0.3,  1.0,  0.05, L["SL_OPACITY"],
-        function(v) if mainFrame then mainFrame:SetAlpha(v) end end)
-    Sl(t1, "Slider_height", CX2, y1, SLW, "barHeight", 14,   50,   1,    L["SL_HEIGHT"],
-        function() RebuildBars() end)
-    y1 = y1 - 46
+    SecLabel(t1, "APPARENCE", CX1, y); y = y - SECH
 
-    Sl(t1, "Slider_width", CX1, y1, SLW, "frameWidth", 120, 400, 10, L["SL_WIDTH"],
+    Sl(t1, "Slider_alpha",  CX1, y, SLW, "alpha",     0.3, 1.0, 0.05, L["SL_OPACITY"],
+        function(v) if mainFrame then mainFrame:SetAlpha(v) end end,
+        function(v) return v * 100 end)   -- convert 0.3-1.0 -> 30-100 for "%.0f%%"
+    Sl(t1, "Slider_height", CX2, y, SLW, "barHeight", 14,  50,  1,    L["SL_HEIGHT"],
         function() RebuildBars() end)
-    local _, RefreshTextureLabel = DD(t1, "LOXX_BarTextureDropDown", CX2, y1, DDW,
+    y = y - SLR
+
+    Sl(t1, "Slider_width", CX1, y, SLW, "frameWidth", 120, 400, 10, L["SL_WIDTH"],
+        function() RebuildBars() end)
+    local _, RefTexture = DD(t1, "LOXX_BarTextureDropDown", CX2, y, DDW,
         BAR_TEXTURE_PRESETS, function() return db.barTexturePreset or 1 end,
         function(i) db.barTexturePreset = i; ApplyTexturePreset(); RebuildBars() end,
         L["DD_BAR_TEXTURE"])
-    RefreshTextureLabel()
-    y1 = y1 - 48
+    RefTexture()
+    y = y - SLR
 
-    local _, RefreshFontLabel = DD(t1, "LOXX_FontPresetDropDown", CX1, y1, DDW,
+    local _, RefFont = DD(t1, "LOXX_FontPresetDropDown", CX1, y, DDW,
         FONT_PRESETS, function() return db.fontPreset or 1 end,
         function(i) db.fontPreset = i; ApplyFontPreset(); RebuildBars() end, L["DD_FONT"])
-    RefreshFontLabel()
-    local _, RefreshColorLabel = DD(t1, "LOXX_FontColorDropDown", CX2, y1, DDW,
+    RefFont()
+    local _, RefColor = DD(t1, "LOXX_FontColorDropDown", CX2, y, DDW,
         FONT_COLOR_PRESETS, function() return db.fontColorPreset or 1 end,
         function(i) db.fontColorPreset = i; ApplyFontPreset(); RebuildBars() end, L["DD_COLOR"])
-    RefreshColorLabel()
-    y1 = y1 - 46
+    RefColor()
+    y = y - DDR
 
-    Sl(t1, "Slider_nameFont", CX1, y1, SLW, "nameFontSize",  2, 32, 1, L["SL_NAME_SIZE"],
+    Sl(t1, "Slider_nameFont", CX1, y, SLW, "nameFontSize",  2, 32, 1, L["SL_NAME_SIZE"],
         function() RebuildBars() end)
-    Sl(t1, "Slider_cdFont",   CX2, y1, SLW, "readyFontSize", 2, 32, 1, L["SL_CD_SIZE"],
+    Sl(t1, "Slider_cdFont",   CX2, y, SLW, "readyFontSize", 2, 32, 1, L["SL_CD_SIZE"],
         function() RebuildBars() end)
-    y1 = y1 - 46
+    y = y - SLR
 
-    Sl(t1, "Slider_readyFont", CX1, y1, SLW, "readyTextSize", 2, 32, 1, L["SL_READY_SIZE"],
+    Sl(t1, "Slider_readyFont", CX1, y, SLW, "readyTextSize", 2, 32, 1, L["SL_READY_SIZE"],
         function() RebuildBars() end)
-    y1 = y1 - 56
+    y = y - SLR - 10
 
-    SecLabel(t1, L["SEC_OPTIONS"], CX1, y1); y1 = y1 - 24
-    CreateCheckbox(t1, L["CB_SHOW_TITLE"], CX1, y1, "showTitle")
-    CreateCheckbox(t1, L["CB_LOCK_POS"],   CX2, y1, "locked");                   y1 = y1 - 26
-    CreateCheckbox(t1, L["CB_SHOW_READY"],   CX1, y1, "showReady")
-    CreateCheckbox(t1, L["CB_SHOW_NEXT"],    CX2, y1, "showNextIndicator", UpdateDisplay); y1 = y1 - 26
-    CreateCheckbox(t1, L["CB_KICKS_BAR"],    CX1, y1, "showKicksReadyBar", UpdateDisplay)
-    CreateCheckbox(t1, L["CB_HIDE_OOC"],     CX2, y1, "hideOutOfCombat",   CheckZoneVisibility); y1 = y1 - 26
-    CreateCheckbox(t1, L["CB_ALERT_CAST"],   CX1, y1, "alertOnCast")
-    CreateCheckbox(t1, L["CB_TOOLTIP"],      CX2, y1, "showTooltip")
+    SecLabel(t1, L["SEC_OPTIONS"], CX1, y); y = y - SECH
+    CreateCheckbox(t1, L["CB_SHOW_TITLE"],  CX1, y, "showTitle")
+    CreateCheckbox(t1, L["CB_LOCK_POS"],    CX2, y, "locked");                       y = y - CBR
+    CreateCheckbox(t1, L["CB_SHOW_READY"],  CX1, y, "showReady")
+    CreateCheckbox(t1, L["CB_SHOW_NEXT"],   CX2, y, "showNextIndicator", UpdateDisplay); y = y - CBR
+    CreateCheckbox(t1, L["CB_KICKS_BAR"],   CX1, y, "showKicksReadyBar", UpdateDisplay)
+    CreateCheckbox(t1, L["CB_HIDE_OOC"],    CX2, y, "hideOutOfCombat",   CheckZoneVisibility); y = y - CBR
+    CreateCheckbox(t1, L["CB_ALERT_CAST"],  CX1, y, "alertOnCast")
+    CreateCheckbox(t1, L["CB_TOOLTIP"],     CX2, y, "showTooltip")
 
     -- ── TAB 2: CC TRACKER ────────────────────────────────────────
     local t2 = tabFrames[2]
-    local y2 = -8
+    y = -10
 
     do
         local cb = CreateFrame("CheckButton", nil, t2, "UICheckButtonTemplate")
-        cb:SetPoint("TOPLEFT", CX1, y2)
+        cb:SetPoint("TOPLEFT", CX1, y)
         local lbl = cb.text or cb.Text
         if lbl then lbl:SetText(L["CB_SHOW_CC"]) end
         cb:SetChecked(db.showCCTracker)
@@ -2912,34 +2923,80 @@ local function CreateConfigPanel()
             end
         end)
     end
-    y2 = y2 - 32
+    y = y - 34
 
-    SecLabel(t2, "APPARENCE", CX1, y2); y2 = y2 - 22
-    Sl(t2, "CfgCC_Slider_alpha",  CX1, y2, SLW, "ccAlpha",    0.3, 1.0, 0.05, L["SL_OPACITY"],
-        function(v) if ccFrame then ccFrame:SetAlpha(v) end end)
-    Sl(t2, "CfgCC_Slider_height", CX2, y2, SLW, "ccBarHeight", 14, 50, 1, L["SL_HEIGHT"],
+    SecLabel(t2, "APPARENCE", CX1, y); y = y - SECH
+    Sl(t2, "CfgCC_Slider_alpha",  CX1, y, SLW, "ccAlpha",    0.3, 1.0, 0.05, L["SL_OPACITY"],
+        function(v) if ccFrame then ccFrame:SetAlpha(v) end end,
+        function(v) return v * 100 end)
+    Sl(t2, "CfgCC_Slider_height", CX2, y, SLW, "ccBarHeight", 14, 50, 1, L["SL_HEIGHT"],
         function() RebuildCCBars() end)
-    y2 = y2 - 46
+    y = y - SLR
 
-    Sl(t2, "CfgCC_Slider_width", CX1, y2, SLW, "ccFrameWidth", 120, 400, 10, L["SL_WIDTH"],
+    Sl(t2, "CfgCC_Slider_width", CX1, y, SLW, "ccFrameWidth", 120, 400, 10, L["SL_WIDTH"],
         function(v) if ccFrame then ccFrame:SetWidth(v) end; RebuildCCBars() end)
-    y2 = y2 - 46
+    y = y - SLR
 
-    Sl(t2, "CfgCC_Slider_nameFont", CX1, y2, SLW, "ccNameFontSize", 2, 32, 1, L["SL_NAME_SIZE"],
+    Sl(t2, "CfgCC_Slider_nameFont", CX1, y, SLW, "ccNameFontSize", 2, 32, 1, L["SL_NAME_SIZE"],
         function() RebuildCCBars() end)
-    Sl(t2, "CfgCC_Slider_cdFont",   CX2, y2, SLW, "ccCdFontSize",   2, 32, 1, L["SL_CD_SIZE"],
+    Sl(t2, "CfgCC_Slider_cdFont",   CX2, y, SLW, "ccCdFontSize",   2, 32, 1, L["SL_CD_SIZE"],
         function() RebuildCCBars() end)
+    y = y - SLR - 10
+
+    -- ── CLASSES (per-class CC toggle, 2 columns) ─────────────────
+    SecLabel(t2, "CLASSES", CX1, y); y = y - SECH
+
+    local CC_CLASS_ORDER_CFG = {
+        "WARRIOR","ROGUE","DEATHKNIGHT","DEMONHUNTER",
+        "PALADIN","MONK","HUNTER","MAGE",
+        "SHAMAN","DRUID","WARLOCK","PRIEST","EVOKER",
+    }
+    local function FormatClassName(cls)
+        local n = cls:sub(1,1) .. cls:sub(2):lower()
+        n = n:gsub("deathknight", "Death Knight"):gsub("demonhunter", "Demon Hunter")
+        return n
+    end
+
+    for idx2, cls in ipairs(CC_CLASS_ORDER_CFG) do
+        local cc = CC_CLASS_PRIMARY[cls]
+        if cc then
+            local col = CLASS_COLORS[cls] or {1, 1, 1}
+            local isRight = (idx2 % 2 == 0)
+            local xPos = isRight and CX2 or CX1
+            local cb = CreateFrame("CheckButton", nil, t2, "UICheckButtonTemplate")
+            cb:SetPoint("TOPLEFT", xPos, y)
+            cb:SetChecked(not (db.ccHiddenClasses and db.ccHiddenClasses[cls]))
+            local cbLbl = cb.text or cb.Text
+            if cbLbl then
+                local r, g, b = col[1], col[2], col[3]
+                local hex = string.format("%02X%02X%02X",
+                    math.floor(r*255), math.floor(g*255), math.floor(b*255))
+                local cdStr = cc.cd > 0 and ("|cFF888888 " .. cc.cd .. "s|r") or ""
+                cbLbl:SetText("|cFF"..hex..FormatClassName(cls).."|r — "..cc.name..cdStr)
+            end
+            local capturedCls = cls
+            cb:SetScript("OnClick", function(self)
+                if not db.ccHiddenClasses then db.ccHiddenClasses = {} end
+                db.ccHiddenClasses[capturedCls] = self:GetChecked() and nil or true
+                ccDirty = true
+            end)
+            -- advance row every 2 entries (after right column)
+            if isRight then y = y - CBR end
+        end
+    end
+    -- if last class was in left column (odd count), advance row
+    if #CC_CLASS_ORDER_CFG % 2 ~= 0 then y = y - CBR end
 
     -- ── TAB 3: OPTIONS ───────────────────────────────────────────
     local t3 = tabFrames[3]
-    local y3 = -8
+    y = -10
 
-    SecLabel(t3, L["SEC_SHOW_IN"], CX1, y3); y3 = y3 - 22
-    CreateCheckbox(t3, L["VIS_DUNGEONS"],   CX1, y3, "showInDungeon",   CheckZoneVisibility)
-    CreateCheckbox(t3, L["VIS_ARENA"],      CX2, y3, "showInArena",     CheckZoneVisibility); y3 = y3 - 26
-    CreateCheckbox(t3, L["VIS_OPEN_WORLD"], CX1, y3, "showInOpenWorld", CheckZoneVisibility); y3 = y3 - 46
+    SecLabel(t3, L["SEC_SHOW_IN"], CX1, y); y = y - SECH
+    CreateCheckbox(t3, L["VIS_DUNGEONS"],   CX1, y, "showInDungeon",   CheckZoneVisibility)
+    CreateCheckbox(t3, L["VIS_ARENA"],      CX2, y, "showInArena",     CheckZoneVisibility); y = y - CBR
+    CreateCheckbox(t3, L["VIS_OPEN_WORLD"], CX1, y, "showInOpenWorld", CheckZoneVisibility); y = y - CBR - 10
 
-    SecLabel(t3, L["SEC_SOUND"], CX1, y3); y3 = y3 - 22
+    SecLabel(t3, L["SEC_SOUND"], CX1, y); y = y - SECH
     local function GetSoundPresetIndex()
         if not db.soundOnReady or not db.soundID then return 1 end
         for i = 2, #SOUND_PRESETS do
@@ -2947,7 +3004,7 @@ local function CreateConfigPanel()
         end
         return 2
     end
-    local _, RefreshSoundLabel = DD(t3, "LOXX_SoundPresetDropDown", CX1, y3, DDW * 2 + GAP,
+    local _, RefSound = DD(t3, "LOXX_SoundPresetDropDown", CX1, y, DDFW,
         SOUND_PRESETS, GetSoundPresetIndex,
         function(i)
             local chosen = SOUND_PRESETS[i]
@@ -2957,8 +3014,8 @@ local function CreateConfigPanel()
                 db.soundOnReady = false; db.soundID = nil
             end
         end, L["DD_SOUND"])
-    RefreshSoundLabel()
-    y3 = y3 - 46
+    RefSound()
+    y = y - DDR - 10
 
     local HIST_PRESETS = {
         { label = "10 runs",  val = 10  },
@@ -2972,21 +3029,21 @@ local function CreateConfigPanel()
         for i, p in ipairs(HIST_PRESETS) do if p.val == v then return i end end
         return 3
     end
-    SecLabel(t3, L["DD_MAX_HISTORY"], CX1, y3); y3 = y3 - 22
-    local _, RefreshHistLabel = DD(t3, "LOXX_HistDropDown", CX1, y3, DDW * 2 + GAP,
+    SecLabel(t3, L["DD_MAX_HISTORY"], CX1, y); y = y - SECH
+    local _, RefHist = DD(t3, "LOXX_HistDropDown", CX1, y, DDFW,
         HIST_PRESETS, GetHistIndex,
         function(i) local p = HIST_PRESETS[i]; if p then db.maxRunHistory = p.val end end,
         L["DD_MAX_HISTORY"])
-    RefreshHistLabel()
-    y3 = y3 - 34
+    RefHist()
+    y = y - 28
     local histTip = t3:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    histTip:SetPoint("TOPLEFT", CX1, y3)
+    histTip:SetPoint("TOPLEFT", CX1, y)
     histTip:SetText(L["DD_MAX_HISTORY_TIP"])
     histTip:SetTextColor(0.55, 0.55, 0.55, 1)
-    y3 = y3 - 44
+    y = y - DDR
 
-    SecLabel(t3, "BROADCAST", CX1, y3); y3 = y3 - 22
-    CreateCheckbox(t3, "Broadcast données aux pairs (messages addon)", CX1, y3, "enableBroadcast")
+    SecLabel(t3, "BROADCAST", CX1, y); y = y - SECH
+    CreateCheckbox(t3, "Envoyer données aux pairs (messages addon)", CX1, y, "enableBroadcast")
 
     -- ── FOOTER ───────────────────────────────────────────────────
     local footerBand = CreateFrame("Frame", nil, configFrame)
@@ -3085,7 +3142,8 @@ end
 
 
 ------------------------------------------------------------
--- Create main frame + resize handle (from ADDON_LOADED)
+-- Create main frame
+ + resize handle (from ADDON_LOADED)
 ------------------------------------------------------------
 local function CreateUI()
     mainFrame = CreateFrame("Frame", "LOXXMainFrame", UIParent)
