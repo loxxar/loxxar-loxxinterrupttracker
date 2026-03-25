@@ -46,7 +46,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.5.5.17"
+local LOXX_VERSION = "1.5.5.18"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -2653,13 +2653,21 @@ local function CreateConfigPanel()
         return
     end
 
-    local PW, PH = 720, 880
-    local MID = PW * 0.5
-    local SL_W = 260
-    local PADDING = 24
+    local FW   = 520
+    local FH   = 590
+    local HDR  = 86
+    local TABH = 28
+    local FOOT = 70
+    local PAD  = 18
+    local GAP  = 10
+    local CW   = math.floor((FW - 2 * PAD - GAP) / 2)
+    local SLW  = CW - 4
+    local DDW  = CW - 4
+    local CX1  = PAD
+    local CX2  = PAD + CW + GAP
 
     configFrame = CreateFrame("Frame", "LoxxConfigFrame", UIParent, "BasicFrameTemplate")
-    configFrame:SetSize(PW + 80, PH + 120)
+    configFrame:SetSize(FW, FH)
     RestoreWinPos("configFrameX", "configFrameY", configFrame, function()
         configFrame:SetPoint("CENTER")
     end)
@@ -2670,64 +2678,40 @@ local function CreateConfigPanel()
     configFrame:SetScript("OnDragStart", configFrame.StartMoving)
     configFrame:SetScript("OnDragStop", function(self)
         self:StopMovingOrSizing()
-        -- Stats: left of config
         if statsFrame and statsFrame:IsShown() then
             statsFrame:ClearAllPoints()
             statsFrame:SetPoint("TOPRIGHT", configFrame, "TOPLEFT", -4, 0)
         end
-        -- Score: right of config
         if scoreFrame and scoreFrame:IsShown() then
             scoreFrame:ClearAllPoints()
             scoreFrame:SetPoint("TOPLEFT", configFrame, "TOPRIGHT", 4, 0)
         end
-        -- CC Config: bottom-right of config
-        if ccConfigFrame and ccConfigFrame:IsShown() then
-            ccConfigFrame:ClearAllPoints()
-            ccConfigFrame:SetPoint("BOTTOMLEFT", configFrame, "BOTTOMRIGHT", 4, 0)
-        end
-        -- Save config position
         SaveWinPos("configFrameX", "configFrameY", configFrame)
     end)
     configFrame:SetClampedToScreen(true)
     if configFrame.TitleText then configFrame.TitleText:SetText("") end
-    -- Escape key closes Settings (and triggers OnHide → closes child windows)
     table.insert(UISpecialFrames, "LoxxConfigFrame")
-    -- Close child windows when Settings is closed (Escape or close button)
     configFrame:SetScript("OnHide", function()
-        if statsFrame then
-            statsFrame:Hide(); statsFrame = nil
-        end
-        if scoreFrame then
-            scoreFrame:Hide(); scoreFrame = nil
-        end
-        if ccConfigFrame then
-            ccConfigFrame:Hide()
-        end
-        -- Note: ccFrame (CC Tracker) is a gameplay window — NOT closed with config
+        if statsFrame then statsFrame:Hide(); statsFrame = nil end
+        if scoreFrame then scoreFrame:Hide(); scoreFrame = nil end
+        if ccConfigFrame then ccConfigFrame:Hide() end
     end)
 
-    -- Header background: warm dark
+    -- ── HEADER ───────────────────────────────────────────────────
     local hdr = configFrame:CreateTexture(nil, "BACKGROUND", nil, 2)
     hdr:SetTexture(FLAT_TEX)
     hdr:SetVertexColor(0.12, 0.09, 0.02, 1)
     hdr:SetPoint("TOPLEFT", 0, -22)
     hdr:SetPoint("TOPRIGHT", 0, -22)
     hdr:SetHeight(64)
-    -- Gold top separator
+
     local hdrLineTop = configFrame:CreateTexture(nil, "BORDER")
     hdrLineTop:SetTexture(FLAT_TEX)
     hdrLineTop:SetVertexColor(0.87, 0.73, 0.37, 0.75)
     hdrLineTop:SetPoint("TOPLEFT", 0, -22)
     hdrLineTop:SetPoint("TOPRIGHT", 0, -22)
     hdrLineTop:SetHeight(1)
-    -- Gold bottom separator
-    local hdrLineBot = configFrame:CreateTexture(nil, "BORDER")
-    hdrLineBot:SetTexture(FLAT_TEX)
-    hdrLineBot:SetVertexColor(0.87, 0.73, 0.37, 0.75)
-    hdrLineBot:SetPoint("TOPLEFT", 0, -86)
-    hdrLineBot:SetPoint("TOPRIGHT", 0, -86)
-    hdrLineBot:SetHeight(1)
-    -- Title: centered, gold
+
     local hdrTitle = configFrame:CreateFontString(nil, "OVERLAY")
     hdrTitle:SetFont(FONT_FACE, 22, FONT_FLAGS)
     hdrTitle:SetShadowOffset(2, -2)
@@ -2735,20 +2719,7 @@ local function CreateConfigPanel()
     hdrTitle:SetPoint("CENTER", configFrame, "TOP", 0, -44)
     hdrTitle:SetJustifyH("CENTER")
     hdrTitle:SetText("|cFFFFD100" .. L["SETTINGS_TITLE"] .. "|r")
-    -- Decorative gold lines flanking the title
-    local hdrLineL = configFrame:CreateTexture(nil, "ARTWORK")
-    hdrLineL:SetTexture(FLAT_TEX)
-    hdrLineL:SetHeight(1)
-    hdrLineL:SetVertexColor(0.87, 0.73, 0.37, 0.55)
-    hdrLineL:SetPoint("LEFT", configFrame, "TOPLEFT", 16, -44)
-    hdrLineL:SetPoint("RIGHT", hdrTitle, "LEFT", -10, 0)
-    local hdrLineR = configFrame:CreateTexture(nil, "ARTWORK")
-    hdrLineR:SetTexture(FLAT_TEX)
-    hdrLineR:SetHeight(1)
-    hdrLineR:SetVertexColor(0.87, 0.73, 0.37, 0.55)
-    hdrLineR:SetPoint("LEFT", hdrTitle, "RIGHT", 10, 0)
-    hdrLineR:SetPoint("RIGHT", configFrame, "TOPRIGHT", -16, -44)
-    -- Version: smaller, darker gold, below title
+
     local hdrVersion = configFrame:CreateFontString(nil, "OVERLAY")
     hdrVersion:SetFont(FONT_FACE, 11, FONT_FLAGS)
     hdrVersion:SetShadowOffset(1, -1)
@@ -2757,398 +2728,218 @@ local function CreateConfigPanel()
     hdrVersion:SetJustifyH("CENTER")
     hdrVersion:SetText("|cFFAA8800v" .. LOXX_VERSION .. "|r")
 
-    -- Vertical divider (decorative only)
-    local columnBgLeft = configFrame:CreateTexture(nil, "BACKGROUND", nil, -2)
-    columnBgLeft:SetTexture(FLAT_TEX)
-    columnBgLeft:SetVertexColor(0.08, 0.07, 0.05, 0.85)
-    columnBgLeft:SetPoint("TOPLEFT", PADDING, -90)
-    columnBgLeft:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMLEFT", MID - 12, 64)
+    -- ── TAB BAR ──────────────────────────────────────────────────
+    local tabFrames = {}
+    local tabBtns   = {}
 
-    local columnBgRight = configFrame:CreateTexture(nil, "BACKGROUND", nil, -2)
-    columnBgRight:SetTexture(FLAT_TEX)
-    columnBgRight:SetVertexColor(0.08, 0.07, 0.05, 0.85)
-    columnBgRight:SetPoint("TOPLEFT", configFrame, "TOPLEFT", MID + 12, -90)
-    columnBgRight:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -PADDING, 64)
-
-    local div = configFrame:CreateTexture(nil, "ARTWORK")
-    div:SetTexture(FLAT_TEX)
-    div:SetVertexColor(0.45, 0.38, 0.22, 0.35)
-    div:SetPoint("TOPLEFT", configFrame, "TOPLEFT", MID, -86)
-    div:SetPoint("BOTTOMLEFT", configFrame, "BOTTOMLEFT", MID, 52)
-    div:SetWidth(1)
-
-    local L_X1, L_CBX1, L_CBX2, SL_XL = PADDING + 4, PADDING + 10, PADDING + 172, PADDING + 40
-    local R_X1, R_CBX1, R_CBX2 = MID + 20, MID + 30, MID + 192
-
-    local function SectionLabelL(text, yOff)
-        local lbl = configFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        lbl:SetPoint("TOPLEFT", L_X1, yOff)
-        lbl:SetText("|cFFFFD100" .. text .. "|r")
-        local rule = configFrame:CreateTexture(nil, "ARTWORK")
-        rule:SetTexture(FLAT_TEX)
-        rule:SetVertexColor(0.87, 0.73, 0.37, 0.35)
-        rule:SetPoint("LEFT", lbl, "RIGHT", 6, 0)
-        rule:SetPoint("RIGHT", configFrame, "LEFT", MID - 18, 0)
-        rule:SetHeight(1)
-    end
-    local function SectionLabelR(text, yOff)
-        local lbl = configFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        lbl:SetPoint("TOPLEFT", R_X1, yOff)
-        lbl:SetText("|cFFFFD100" .. text .. "|r")
-        local rule = configFrame:CreateTexture(nil, "ARTWORK")
-        rule:SetTexture(FLAT_TEX)
-        rule:SetVertexColor(0.87, 0.73, 0.37, 0.35)
-        rule:SetPoint("LEFT", lbl, "RIGHT", 6, 0)
-        rule:SetPoint("RIGHT", configFrame, "RIGHT", -PADDING, 0)
-        rule:SetHeight(1)
-    end
-
-    -- ── LEFT COLUMN ─────────────────────────────────────────────
-    local yL = -102
-    SectionLabelL("INTERRUPT TRACKER", yL)
-    yL = yL - 32
-
-    local alphaSlider = MakeSlider("LOXX_Slider_alpha", configFrame)
-    alphaSlider:SetPoint("TOPLEFT", SL_XL, yL)
-    alphaSlider:SetSize(SL_W, 28)
-    alphaSlider:SetMinMaxValues(0.3, 1.0)
-    alphaSlider:SetValueStep(0.05)
-    alphaSlider:SetObeyStepOnDrag(true)
-    alphaSlider:SetValue(db.alpha)
-    alphaSlider.Text:SetText(string.format(L["SL_OPACITY"], (db.alpha or 0.9) * 100))
-    alphaSlider.Low:SetText("30%")
-    alphaSlider.High:SetText("100%")
-    alphaSlider:SetScript("OnValueChanged", function(self, value)
-        value = math.floor(value * 20 + 0.5) / 20
-        db.alpha = value
-        self.Text:SetText(string.format(L["SL_OPACITY"], value * 100))
-        if mainFrame then mainFrame:SetAlpha(value) end
-    end)
-
-    yL = yL - 56
-    local initW = db.frameWidth or 180
-    local widthSlider = MakeSlider("LOXX_Slider_width", configFrame)
-    widthSlider:SetPoint("TOPLEFT", SL_XL, yL)
-    widthSlider:SetSize(SL_W, 28)
-    widthSlider:SetMinMaxValues(120, 400)
-    widthSlider:SetValueStep(10)
-    widthSlider:SetObeyStepOnDrag(true)
-    widthSlider:SetValue(initW)
-    widthSlider.Text:SetText(string.format(L["SL_WIDTH"], initW))
-    widthSlider.Low:SetText("120")
-    widthSlider.High:SetText("400")
-    widthSlider:SetScript("OnValueChanged", function(self, value)
-        value = math.floor(value / 10 + 0.5) * 10
-        db.frameWidth = value
-        self.Text:SetText(string.format(L["SL_WIDTH"], value))
-        RebuildBars()
-    end)
-
-    yL = yL - 56
-    local initH = db.barHeight or 20
-    local heightSlider = MakeSlider("LOXX_Slider_height", configFrame)
-    heightSlider:SetPoint("TOPLEFT", SL_XL, yL)
-    heightSlider:SetSize(SL_W, 28)
-    heightSlider:SetMinMaxValues(14, 50)
-    heightSlider:SetValueStep(1)
-    heightSlider:SetObeyStepOnDrag(true)
-    heightSlider:SetValue(initH)
-    heightSlider.Text:SetText(string.format(L["SL_HEIGHT"], initH))
-    heightSlider.Low:SetText("14")
-    heightSlider.High:SetText("50")
-    heightSlider:SetScript("OnValueChanged", function(self, value)
-        value = math.floor(value + 0.5)
-        db.barHeight = value
-        self.Text:SetText(string.format(L["SL_HEIGHT"], value))
-        RebuildBars()
-    end)
-
-    -- FONT SIZES (still under INTERRUPT TRACKER)
-    yL = yL - 48
-    local initNameFont = math.max(2, db.nameFontSize or 12)
-    local nameSlider = MakeSlider("LOXX_Slider_nameFont", configFrame)
-    nameSlider:SetPoint("TOPLEFT", SL_XL, yL)
-    nameSlider:SetSize(SL_W, 28)
-    nameSlider:SetMinMaxValues(2, 32)
-    nameSlider:SetValueStep(1)
-    nameSlider:SetObeyStepOnDrag(true)
-    nameSlider:SetValue(initNameFont)
-    nameSlider.Text:SetText(string.format(L["SL_NAME_SIZE"], initNameFont))
-    nameSlider.Low:SetText("2")
-    nameSlider.High:SetText("32")
-    nameSlider:SetScript("OnValueChanged", function(self, value)
-        value = math.floor(value + 0.5)
-        db.nameFontSize = value
-        self.Text:SetText(string.format(L["SL_NAME_SIZE"], value))
-        RebuildBars()
-    end)
-
-    yL = yL - 48
-    local initCdFont = math.max(2, db.readyFontSize or 12)
-    local cdSlider = MakeSlider("LOXX_Slider_cdFont", configFrame)
-    cdSlider:SetPoint("TOPLEFT", SL_XL, yL)
-    cdSlider:SetSize(SL_W, 28)
-    cdSlider:SetMinMaxValues(2, 32)
-    cdSlider:SetValueStep(1)
-    cdSlider:SetObeyStepOnDrag(true)
-    cdSlider:SetValue(initCdFont)
-    cdSlider.Text:SetText(string.format(L["SL_CD_SIZE"], initCdFont))
-    cdSlider.Low:SetText("2")
-    cdSlider.High:SetText("32")
-    cdSlider:SetScript("OnValueChanged", function(self, value)
-        value = math.floor(value + 0.5)
-        db.readyFontSize = value
-        self.Text:SetText(string.format(L["SL_CD_SIZE"], value))
-        RebuildBars()
-    end)
-
-    yL = yL - 48
-    local initReadyFont = math.max(2, db.readyTextSize or 12)
-    local readySlider = MakeSlider("LOXX_Slider_readyFont", configFrame)
-    readySlider:SetPoint("TOPLEFT", SL_XL, yL)
-    readySlider:SetSize(SL_W, 26)
-    readySlider:SetMinMaxValues(2, 32)
-    readySlider:SetValueStep(1)
-    readySlider:SetObeyStepOnDrag(true)
-    readySlider:SetValue(initReadyFont)
-    readySlider.Text:SetText(string.format(L["SL_READY_SIZE"], initReadyFont))
-    readySlider.Low:SetText("2")
-    readySlider.High:SetText("32")
-    readySlider:SetScript("OnValueChanged", function(self, value)
-        value = math.floor(value + 0.5)
-        db.readyTextSize = value
-        self.Text:SetText(string.format(L["SL_READY_SIZE"], value))
-        RebuildBars()
-    end)
-
-    local PRESET_DROPDOWN_W = 160
-
-    yL = yL - 52
-    local _, RefreshFontLabel = CreatePresetDropdownControl(
-        configFrame,
-        "LOXX_FontPresetDropDown",
-        SL_XL, yL, PRESET_DROPDOWN_W,
-        FONT_PRESETS,
-        function() return db.fontPreset or 1 end,
-        function(i)
-            db.fontPreset = i
-            ApplyFontPreset()
-            RebuildBars()
-        end,
-        L["DD_FONT"]
-    )
-    RefreshFontLabel()
-
-    yL = yL - 40
-    local _, RefreshColorLabel = CreatePresetDropdownControl(
-        configFrame,
-        "LOXX_FontColorDropDown",
-        SL_XL, yL, PRESET_DROPDOWN_W,
-        FONT_COLOR_PRESETS,
-        function() return db.fontColorPreset or 1 end,
-        function(i)
-            db.fontColorPreset = i
-            ApplyFontPreset()
-            RebuildBars()
-        end,
-        L["DD_COLOR"]
-    )
-    RefreshColorLabel()
-
-    yL = yL - 40
-    local _, RefreshTextureLabel = CreatePresetDropdownControl(
-        configFrame,
-        "LOXX_BarTextureDropDown",
-        SL_XL, yL, PRESET_DROPDOWN_W,
-        BAR_TEXTURE_PRESETS,
-        function() return db.barTexturePreset or 1 end,
-        function(i)
-            db.barTexturePreset = i
-            ApplyTexturePreset()
-            RebuildBars()
-        end,
-        L["DD_BAR_TEXTURE"]
-    )
-    RefreshTextureLabel()
-
-    -- OPTIONS
-    yL = yL - 48
-    SectionLabelL(L["SEC_OPTIONS"], yL)
-    yL = yL - 30
-    CreateCheckbox(configFrame, L["CB_SHOW_TITLE"], L_CBX1, yL, "showTitle")
-    yL = yL - 32
-    CreateCheckbox(configFrame, L["CB_LOCK_POS"], L_CBX1, yL, "locked")
-    CreateCheckbox(configFrame, L["CB_SHOW_READY"], L_CBX2, yL, "showReady")
-    yL = yL - 28
-    CreateCheckbox(configFrame, L["CB_KICKS_BAR"], L_CBX1, yL, "showKicksReadyBar", UpdateDisplay)
-    yL = yL - 28
-    do
-        local cb = CreateFrame("CheckButton", nil, configFrame, "UICheckButtonTemplate")
-        cb:SetPoint("TOPLEFT", L_CBX1, yL)
-        local cbLabel = cb.text or cb.Text
-        if cbLabel then cbLabel:SetText(L["CB_HIDE_OOC"]) end
-        cb:SetChecked(db.hideOutOfCombat)
-        cb:SetScript("OnClick", function(self)
-            db.hideOutOfCombat = self:GetChecked() and true or false
-            CheckZoneVisibility()
-        end)
-    end
-
-    -- ── RIGHT COLUMN ─────────────────────────────────────────────
-    local yR = -102
-
-    -- CC TRACKER (top — mirroring INTERRUPT TRACKER on the left)
-    SectionLabelR("CC TRACKER", yR)
-    yR = yR - 30
-    local ccCb = CreateFrame("CheckButton", nil, configFrame, "UICheckButtonTemplate")
-    ccCb:SetPoint("TOPLEFT", R_CBX1, yR)
-    local ccCbLabel = ccCb.text or ccCb.Text
-    if ccCbLabel then ccCbLabel:SetText(L["CB_SHOW_CC"]) end
-    ccCb:SetChecked(db.showCCTracker)
-    ccCb:SetScript("OnClick", function(self)
-        db.showCCTracker = self:GetChecked() and true or false
-        if db.showCCTracker then
-            if ToggleCCTracker then ToggleCCTracker(true) end
-        else
-            if ccFrame then ccFrame:Hide() end
+    local function ActivateTab(idx)
+        for i, f in ipairs(tabFrames) do f:SetShown(i == idx) end
+        for i, btn in ipairs(tabBtns) do
+            local on = (i == idx)
+            btn._bg:SetVertexColor(on and 0.18 or 0.09, on and 0.14 or 0.08, on and 0.06 or 0.05, 1)
+            btn._lbl:SetTextColor(on and 1 or 0.4, on and 0.82 or 0.38, on and 0 or 0.3, 1)
+            btn._top:SetShown(on)
         end
-    end)
-
-    yR = yR - 32
-    local ccConfigBtn = CreateFrame("Button", nil, configFrame, "UIPanelButtonTemplate")
-    ccConfigBtn:SetSize(140, 22)
-    ccConfigBtn:SetPoint("TOPLEFT", R_CBX1, yR)
-    ccConfigBtn:SetText("Configure CC")
-    ccConfigBtn:SetScript("OnClick", function()
-        if ShowCCConfig then ShowCCConfig() end
-    end)
-
-    -- CC bar: Opacity
-    yR = yR - 48
-    local initCCAlpha = db.ccAlpha or 0.9
-    local ccAlphaSlider = MakeSlider("LOXX_CfgCC_Slider_alpha", configFrame)
-    ccAlphaSlider:SetPoint("TOPLEFT", R_CBX1, yR)
-    ccAlphaSlider:SetSize(SL_W, 28)
-    ccAlphaSlider:SetMinMaxValues(0.3, 1.0)
-    ccAlphaSlider:SetValueStep(0.05)
-    ccAlphaSlider:SetObeyStepOnDrag(true)
-    ccAlphaSlider:SetValue(initCCAlpha)
-    ccAlphaSlider.Text:SetText(string.format(L["SL_OPACITY"], initCCAlpha * 100))
-    ccAlphaSlider.Low:SetText("30%")
-    ccAlphaSlider.High:SetText("100%")
-    ccAlphaSlider:SetScript("OnValueChanged", function(self, value)
-        value = math.floor(value * 20 + 0.5) / 20
-        db.ccAlpha = value
-        self.Text:SetText(string.format(L["SL_OPACITY"], value * 100))
-        if ccFrame then ccFrame:SetAlpha(value) end
-    end)
-
-    -- CC bar: Width
-    yR = yR - 56
-    local initCCW2 = db.ccFrameWidth or db.frameWidth or 200
-    local ccWidthSlider2 = MakeSlider("LOXX_CfgCC_Slider_width", configFrame)
-    ccWidthSlider2:SetPoint("TOPLEFT", R_CBX1, yR)
-    ccWidthSlider2:SetSize(SL_W, 28)
-    ccWidthSlider2:SetMinMaxValues(120, 400)
-    ccWidthSlider2:SetValueStep(10)
-    ccWidthSlider2:SetObeyStepOnDrag(true)
-    ccWidthSlider2:SetValue(initCCW2)
-    ccWidthSlider2.Text:SetText(string.format(L["SL_WIDTH"], initCCW2))
-    ccWidthSlider2.Low:SetText("120")
-    ccWidthSlider2.High:SetText("400")
-    ccWidthSlider2:SetScript("OnValueChanged", function(self, value)
-        value = math.floor(value / 10 + 0.5) * 10
-        db.ccFrameWidth = value
-        self.Text:SetText(string.format(L["SL_WIDTH"], value))
-        if ccFrame then ccFrame:SetWidth(value) end
-        RebuildCCBars()
-    end)
-
-    -- CC bar: Height
-    yR = yR - 56
-    local initCCH2 = db.ccBarHeight or db.barHeight or 22
-    local ccHeightSlider2 = MakeSlider("LOXX_CfgCC_Slider_height", configFrame)
-    ccHeightSlider2:SetPoint("TOPLEFT", R_CBX1, yR)
-    ccHeightSlider2:SetSize(SL_W, 28)
-    ccHeightSlider2:SetMinMaxValues(14, 50)
-    ccHeightSlider2:SetValueStep(1)
-    ccHeightSlider2:SetObeyStepOnDrag(true)
-    ccHeightSlider2:SetValue(initCCH2)
-    ccHeightSlider2.Text:SetText(string.format(L["SL_HEIGHT"], initCCH2))
-    ccHeightSlider2.Low:SetText("14")
-    ccHeightSlider2.High:SetText("50")
-    ccHeightSlider2:SetScript("OnValueChanged", function(self, value)
-        value = math.floor(value + 0.5)
-        db.ccBarHeight = value
-        self.Text:SetText(string.format(L["SL_HEIGHT"], value))
-        RebuildCCBars()
-    end)
-
-    -- CC bar: Name Size
-    yR = yR - 56
-    local initCCNameFont2 = math.max(2, db.ccNameFontSize or db.nameFontSize or 12)
-    local ccNameFontSlider2 = MakeSlider("LOXX_CfgCC_Slider_nameFont", configFrame)
-    ccNameFontSlider2:SetPoint("TOPLEFT", R_CBX1, yR)
-    ccNameFontSlider2:SetSize(SL_W, 28)
-    ccNameFontSlider2:SetMinMaxValues(2, 32)
-    ccNameFontSlider2:SetValueStep(1)
-    ccNameFontSlider2:SetObeyStepOnDrag(true)
-    ccNameFontSlider2:SetValue(initCCNameFont2)
-    ccNameFontSlider2.Text:SetText(string.format(L["SL_NAME_SIZE"], initCCNameFont2))
-    ccNameFontSlider2.Low:SetText("2")
-    ccNameFontSlider2.High:SetText("32")
-    ccNameFontSlider2:SetScript("OnValueChanged", function(self, value)
-        value = math.floor(value + 0.5)
-        db.ccNameFontSize = value
-        self.Text:SetText(string.format(L["SL_NAME_SIZE"], value))
-        RebuildCCBars()
-    end)
-
-    -- CC bar: CD Size
-    yR = yR - 56
-    local initCCCdFont2 = math.max(2, db.ccCdFontSize or db.readyFontSize or 12)
-    local ccCdFontSlider2 = MakeSlider("LOXX_CfgCC_Slider_cdFont", configFrame)
-    ccCdFontSlider2:SetPoint("TOPLEFT", R_CBX1, yR)
-    ccCdFontSlider2:SetSize(SL_W, 28)
-    ccCdFontSlider2:SetMinMaxValues(2, 32)
-    ccCdFontSlider2:SetValueStep(1)
-    ccCdFontSlider2:SetObeyStepOnDrag(true)
-    ccCdFontSlider2:SetValue(initCCCdFont2)
-    ccCdFontSlider2.Text:SetText(string.format(L["SL_CD_SIZE"], initCCCdFont2))
-    ccCdFontSlider2.Low:SetText("2")
-    ccCdFontSlider2.High:SetText("32")
-    ccCdFontSlider2:SetScript("OnValueChanged", function(self, value)
-        value = math.floor(value + 0.5)
-        db.ccCdFontSize = value
-        self.Text:SetText(string.format(L["SL_CD_SIZE"], value))
-        RebuildCCBars()
-    end)
-
-    -- SHOW IN
-    yR = yR - 48
-    SectionLabelR(L["SEC_SHOW_IN"], yR)
-    yR = yR - 30
-    local function VisCheck(parent, label, x, y, key)
-        local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
-        cb:SetPoint("TOPLEFT", x, y)
-        local cbLabel = cb.text or cb.Text
-        if cbLabel then cbLabel:SetText(label) end
-        cb:SetChecked(db[key])
-        cb:SetScript("OnClick", function(self)
-            db[key] = self:GetChecked() and true or false
-            CheckZoneVisibility()
-        end)
-        return cb
     end
-    VisCheck(configFrame, L["VIS_DUNGEONS"], R_CBX1, yR, "showInDungeon")
-    VisCheck(configFrame, L["VIS_ARENA"], R_CBX2, yR, "showInArena")
-    yR = yR - 32
-    VisCheck(configFrame, L["VIS_OPEN_WORLD"], R_CBX1, yR, "showInOpenWorld")
 
-    -- SOUND
-    yR = yR - 48
-    SectionLabelR(L["SEC_SOUND"], yR)
-    yR = yR - 30
+    local tabNames = { "INTERRUPT", "CC TRACKER", "OPTIONS" }
+    local TW = math.floor(FW / #tabNames)
+
+    -- Tab bar background
+    local tabBarBg = configFrame:CreateTexture(nil, "BACKGROUND", nil, 1)
+    tabBarBg:SetTexture(FLAT_TEX)
+    tabBarBg:SetVertexColor(0.09, 0.08, 0.05, 1)
+    tabBarBg:SetPoint("TOPLEFT", 0, -HDR)
+    tabBarBg:SetPoint("TOPRIGHT", 0, -HDR)
+    tabBarBg:SetHeight(TABH)
+
+    for i, name in ipairs(tabNames) do
+        local bx = (i - 1) * TW
+        local bw = (i == #tabNames) and (FW - bx) or TW
+        local btn = CreateFrame("Button", nil, configFrame)
+        btn:SetSize(bw, TABH)
+        btn:SetPoint("TOPLEFT", bx, -HDR)
+
+        local bg = btn:CreateTexture(nil, "BACKGROUND")
+        bg:SetTexture(FLAT_TEX); bg:SetAllPoints()
+        btn._bg = bg
+
+        local top = btn:CreateTexture(nil, "OVERLAY")
+        top:SetTexture(FLAT_TEX)
+        top:SetVertexColor(1, 0.82, 0, 1)
+        top:SetHeight(2)
+        top:SetPoint("TOPLEFT"); top:SetPoint("TOPRIGHT")
+        btn._top = top
+
+        local lbl = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetAllPoints(); lbl:SetJustifyH("CENTER"); lbl:SetText(name)
+        btn._lbl = lbl
+
+        if i < #tabNames then
+            local sep = btn:CreateTexture(nil, "BORDER")
+            sep:SetTexture(FLAT_TEX)
+            sep:SetVertexColor(0.45, 0.38, 0.22, 0.4)
+            sep:SetWidth(1)
+            sep:SetPoint("TOPRIGHT", 0, 0); sep:SetPoint("BOTTOMRIGHT", 0, 0)
+        end
+
+        local idx = i
+        btn:SetScript("OnClick", function() ActivateTab(idx) end)
+        tabBtns[i] = btn
+    end
+
+    -- Tab bottom border
+    local tabLine = configFrame:CreateTexture(nil, "BORDER")
+    tabLine:SetTexture(FLAT_TEX)
+    tabLine:SetVertexColor(0.45, 0.38, 0.22, 0.55)
+    tabLine:SetHeight(1)
+    tabLine:SetPoint("TOPLEFT", 0, -(HDR + TABH))
+    tabLine:SetPoint("TOPRIGHT", 0, -(HDR + TABH))
+
+    -- One content frame per tab
+    for i = 1, 3 do
+        local f = CreateFrame("Frame", nil, configFrame)
+        f:SetPoint("TOPLEFT", 0, -(HDR + TABH + 1))
+        f:SetPoint("BOTTOMRIGHT", 0, FOOT)
+        tabFrames[i] = f
+    end
+
+    -- ── LOCAL HELPERS ─────────────────────────────────────────────
+    local function SecLabel(parent, text, x, y)
+        local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        lbl:SetPoint("TOPLEFT", x, y)
+        lbl:SetText("|cFFFFD100" .. text .. "|r")
+        local rule = parent:CreateTexture(nil, "ARTWORK")
+        rule:SetTexture(FLAT_TEX)
+        rule:SetVertexColor(0.45, 0.38, 0.22, 0.35)
+        rule:SetHeight(1)
+        rule:SetPoint("LEFT", lbl, "RIGHT", 6, 0)
+        rule:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -PAD, y - 7)
+        return lbl
+    end
+
+    local function Sl(parent, name, x, y, w, dbkey, mn, mx, step, fmt, onchange)
+        local s = MakeSlider("LOXX_" .. name, parent)
+        s:SetPoint("TOPLEFT", x, y)
+        s:SetSize(w, 28)
+        s:SetMinMaxValues(mn, mx)
+        s:SetValueStep(step)
+        s:SetObeyStepOnDrag(true)
+        local v = math.max(mn, math.min(mx, db[dbkey] or mn))
+        s:SetValue(v)
+        s.Text:SetText(string.format(fmt, v))
+        s.Low:SetText(tostring(mn))
+        s.High:SetText(tostring(mx))
+        s:SetScript("OnValueChanged", function(self, val)
+            val = math.floor(val / step + 0.5) * step
+            db[dbkey] = val
+            self.Text:SetText(string.format(fmt, val))
+            if onchange then onchange(val) end
+        end)
+        return s
+    end
+
+    local function DD(parent, name, x, y, w, presets, getIdx, onSel, prefix)
+        return CreatePresetDropdownControl(parent, name, x, y, w, presets, getIdx, onSel, prefix)
+    end
+
+    -- ── TAB 1: INTERRUPT ─────────────────────────────────────────
+    local t1 = tabFrames[1]
+    local y1 = -8
+
+    SecLabel(t1, "APPARENCE", CX1, y1); y1 = y1 - 22
+    Sl(t1, "Slider_alpha",  CX1, y1, SLW, "alpha",     0.3,  1.0,  0.05, L["SL_OPACITY"],
+        function(v) if mainFrame then mainFrame:SetAlpha(v) end end)
+    Sl(t1, "Slider_height", CX2, y1, SLW, "barHeight", 14,   50,   1,    L["SL_HEIGHT"],
+        function() RebuildBars() end)
+    y1 = y1 - 46
+
+    Sl(t1, "Slider_width", CX1, y1, SLW, "frameWidth", 120, 400, 10, L["SL_WIDTH"],
+        function() RebuildBars() end)
+    local _, RefreshTextureLabel = DD(t1, "LOXX_BarTextureDropDown", CX2, y1, DDW,
+        BAR_TEXTURE_PRESETS, function() return db.barTexturePreset or 1 end,
+        function(i) db.barTexturePreset = i; ApplyTexturePreset(); RebuildBars() end,
+        L["DD_BAR_TEXTURE"])
+    RefreshTextureLabel()
+    y1 = y1 - 48
+
+    local _, RefreshFontLabel = DD(t1, "LOXX_FontPresetDropDown", CX1, y1, DDW,
+        FONT_PRESETS, function() return db.fontPreset or 1 end,
+        function(i) db.fontPreset = i; ApplyFontPreset(); RebuildBars() end, L["DD_FONT"])
+    RefreshFontLabel()
+    local _, RefreshColorLabel = DD(t1, "LOXX_FontColorDropDown", CX2, y1, DDW,
+        FONT_COLOR_PRESETS, function() return db.fontColorPreset or 1 end,
+        function(i) db.fontColorPreset = i; ApplyFontPreset(); RebuildBars() end, L["DD_COLOR"])
+    RefreshColorLabel()
+    y1 = y1 - 46
+
+    Sl(t1, "Slider_nameFont", CX1, y1, SLW, "nameFontSize",  2, 32, 1, L["SL_NAME_SIZE"],
+        function() RebuildBars() end)
+    Sl(t1, "Slider_cdFont",   CX2, y1, SLW, "readyFontSize", 2, 32, 1, L["SL_CD_SIZE"],
+        function() RebuildBars() end)
+    y1 = y1 - 46
+
+    Sl(t1, "Slider_readyFont", CX1, y1, SLW, "readyTextSize", 2, 32, 1, L["SL_READY_SIZE"],
+        function() RebuildBars() end)
+    y1 = y1 - 56
+
+    SecLabel(t1, L["SEC_OPTIONS"], CX1, y1); y1 = y1 - 24
+    CreateCheckbox(t1, L["CB_SHOW_TITLE"], CX1, y1, "showTitle")
+    CreateCheckbox(t1, L["CB_LOCK_POS"],   CX2, y1, "locked");                   y1 = y1 - 26
+    CreateCheckbox(t1, L["CB_SHOW_READY"],   CX1, y1, "showReady")
+    CreateCheckbox(t1, L["CB_SHOW_NEXT"],    CX2, y1, "showNextIndicator", UpdateDisplay); y1 = y1 - 26
+    CreateCheckbox(t1, L["CB_KICKS_BAR"],    CX1, y1, "showKicksReadyBar", UpdateDisplay)
+    CreateCheckbox(t1, L["CB_HIDE_OOC"],     CX2, y1, "hideOutOfCombat",   CheckZoneVisibility); y1 = y1 - 26
+    CreateCheckbox(t1, L["CB_ALERT_CAST"],   CX1, y1, "alertOnCast")
+    CreateCheckbox(t1, L["CB_TOOLTIP"],      CX2, y1, "showTooltip")
+
+    -- ── TAB 2: CC TRACKER ────────────────────────────────────────
+    local t2 = tabFrames[2]
+    local y2 = -8
+
+    do
+        local cb = CreateFrame("CheckButton", nil, t2, "UICheckButtonTemplate")
+        cb:SetPoint("TOPLEFT", CX1, y2)
+        local lbl = cb.text or cb.Text
+        if lbl then lbl:SetText(L["CB_SHOW_CC"]) end
+        cb:SetChecked(db.showCCTracker)
+        cb:SetScript("OnClick", function(self)
+            db.showCCTracker = self:GetChecked() and true or false
+            if db.showCCTracker then
+                if ToggleCCTracker then ToggleCCTracker(true) end
+            else
+                if ccFrame then ccFrame:Hide() end
+            end
+        end)
+    end
+    y2 = y2 - 32
+
+    SecLabel(t2, "APPARENCE", CX1, y2); y2 = y2 - 22
+    Sl(t2, "CfgCC_Slider_alpha",  CX1, y2, SLW, "ccAlpha",    0.3, 1.0, 0.05, L["SL_OPACITY"],
+        function(v) if ccFrame then ccFrame:SetAlpha(v) end end)
+    Sl(t2, "CfgCC_Slider_height", CX2, y2, SLW, "ccBarHeight", 14, 50, 1, L["SL_HEIGHT"],
+        function() RebuildCCBars() end)
+    y2 = y2 - 46
+
+    Sl(t2, "CfgCC_Slider_width", CX1, y2, SLW, "ccFrameWidth", 120, 400, 10, L["SL_WIDTH"],
+        function(v) if ccFrame then ccFrame:SetWidth(v) end; RebuildCCBars() end)
+    y2 = y2 - 46
+
+    Sl(t2, "CfgCC_Slider_nameFont", CX1, y2, SLW, "ccNameFontSize", 2, 32, 1, L["SL_NAME_SIZE"],
+        function() RebuildCCBars() end)
+    Sl(t2, "CfgCC_Slider_cdFont",   CX2, y2, SLW, "ccCdFontSize",   2, 32, 1, L["SL_CD_SIZE"],
+        function() RebuildCCBars() end)
+
+    -- ── TAB 3: OPTIONS ───────────────────────────────────────────
+    local t3 = tabFrames[3]
+    local y3 = -8
+
+    SecLabel(t3, L["SEC_SHOW_IN"], CX1, y3); y3 = y3 - 22
+    CreateCheckbox(t3, L["VIS_DUNGEONS"],   CX1, y3, "showInDungeon",   CheckZoneVisibility)
+    CreateCheckbox(t3, L["VIS_ARENA"],      CX2, y3, "showInArena",     CheckZoneVisibility); y3 = y3 - 26
+    CreateCheckbox(t3, L["VIS_OPEN_WORLD"], CX1, y3, "showInOpenWorld", CheckZoneVisibility); y3 = y3 - 46
+
+    SecLabel(t3, L["SEC_SOUND"], CX1, y3); y3 = y3 - 22
     local function GetSoundPresetIndex()
         if not db.soundOnReady or not db.soundID then return 1 end
         for i = 2, #SOUND_PRESETS do
@@ -3156,39 +2947,19 @@ local function CreateConfigPanel()
         end
         return 2
     end
-    local _, RefreshSoundLabel = CreatePresetDropdownControl(
-        configFrame,
-        "LOXX_SoundPresetDropDown",
-        R_CBX1, yR, PRESET_DROPDOWN_W,
-        SOUND_PRESETS,
-        GetSoundPresetIndex,
+    local _, RefreshSoundLabel = DD(t3, "LOXX_SoundPresetDropDown", CX1, y3, DDW * 2 + GAP,
+        SOUND_PRESETS, GetSoundPresetIndex,
         function(i)
             local chosen = SOUND_PRESETS[i]
             if chosen and chosen.id then
-                db.soundOnReady = true
-                db.soundID = chosen.id
-                PlaySound(chosen.id, "Master")
+                db.soundOnReady = true; db.soundID = chosen.id; PlaySound(chosen.id, "Master")
             else
-                db.soundOnReady = false
-                db.soundID = nil
+                db.soundOnReady = false; db.soundID = nil
             end
-        end,
-        L["DD_SOUND"]
-    )
+        end, L["DD_SOUND"])
     RefreshSoundLabel()
+    y3 = y3 - 46
 
-    -- UI
-    yR = yR - 48
-    SectionLabelR(L["SEC_UI"], yR)
-    yR = yR - 30
-    CreateCheckbox(configFrame, L["CB_TOOLTIP"], R_CBX1, yR, "showTooltip")
-    yR = yR - 28
-    CreateCheckbox(configFrame, L["CB_ALERT_CAST"], R_CBX1, yR, "alertOnCast")
-    yR = yR - 28
-    CreateCheckbox(configFrame, L["CB_SHOW_NEXT"], R_CBX1, yR, "showNextIndicator", UpdateDisplay)
-
-    -- History limit
-    yR = yR - 48
     local HIST_PRESETS = {
         { label = "10 runs",  val = 10  },
         { label = "25 runs",  val = 25  },
@@ -3201,29 +2972,26 @@ local function CreateConfigPanel()
         for i, p in ipairs(HIST_PRESETS) do if p.val == v then return i end end
         return 3
     end
-    local _, RefreshHistLabel = CreatePresetDropdownControl(
-        configFrame,
-        "LOXX_HistDropDown",
-        R_CBX1, yR, PRESET_DROPDOWN_W,
-        HIST_PRESETS,
-        GetHistIndex,
-        function(i)
-            local chosen = HIST_PRESETS[i]
-            if chosen then db.maxRunHistory = chosen.val end
-        end,
-        L["DD_MAX_HISTORY"]
-    )
+    SecLabel(t3, L["DD_MAX_HISTORY"], CX1, y3); y3 = y3 - 22
+    local _, RefreshHistLabel = DD(t3, "LOXX_HistDropDown", CX1, y3, DDW * 2 + GAP,
+        HIST_PRESETS, GetHistIndex,
+        function(i) local p = HIST_PRESETS[i]; if p then db.maxRunHistory = p.val end end,
+        L["DD_MAX_HISTORY"])
     RefreshHistLabel()
-
-    local histTip = configFrame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    histTip:SetPoint("TOPLEFT", R_CBX1, yR - 28)
+    y3 = y3 - 34
+    local histTip = t3:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    histTip:SetPoint("TOPLEFT", CX1, y3)
     histTip:SetText(L["DD_MAX_HISTORY_TIP"])
     histTip:SetTextColor(0.55, 0.55, 0.55, 1)
+    y3 = y3 - 44
+
+    SecLabel(t3, "BROADCAST", CX1, y3); y3 = y3 - 22
+    CreateCheckbox(t3, "Broadcast données aux pairs (messages addon)", CX1, y3, "enableBroadcast")
 
     -- ── FOOTER ───────────────────────────────────────────────────
     local footerBand = CreateFrame("Frame", nil, configFrame)
-    footerBand:SetHeight(70)
-    footerBand:SetPoint("BOTTOMLEFT", configFrame, "BOTTOMLEFT", 0, 0)
+    footerBand:SetHeight(FOOT)
+    footerBand:SetPoint("BOTTOMLEFT",  configFrame, "BOTTOMLEFT",  0, 0)
     footerBand:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", 0, 0)
     footerBand:SetFrameLevel(configFrame:GetFrameLevel() + 2)
 
@@ -3235,13 +3003,13 @@ local function CreateConfigPanel()
     local footerSep = footerBand:CreateTexture(nil, "BORDER")
     footerSep:SetTexture(FLAT_TEX)
     footerSep:SetVertexColor(0.45, 0.38, 0.22, 0.55)
-    footerSep:SetPoint("TOPLEFT", footerBand, "TOPLEFT", 8, 0)
+    footerSep:SetPoint("TOPLEFT",  footerBand, "TOPLEFT",  8, 0)
     footerSep:SetPoint("TOPRIGHT", footerBand, "TOPRIGHT", -8, 0)
     footerSep:SetHeight(1)
 
     local footerButtons = CreateFrame("Frame", nil, footerBand)
-    footerButtons:SetSize(470, 28)
-    footerButtons:SetPoint("TOPRIGHT", footerBand, "TOPRIGHT", -14, -10)
+    footerButtons:SetSize(FW - 20, 28)
+    footerButtons:SetPoint("TOPRIGHT", footerBand, "TOPRIGHT", -10, -10)
 
     local savePosBtn = CreateFrame("Button", nil, footerButtons, "UIPanelButtonTemplate")
     savePosBtn:SetSize(120, 24)
@@ -3249,9 +3017,7 @@ local function CreateConfigPanel()
     savePosBtn:SetText(L["BTN_SAVE_POS"])
     savePosBtn:SetScript("OnClick", function()
         local function toChat(msg)
-            if ChatFrame1 and ChatFrame1.AddMessage then
-                ChatFrame1:AddMessage(msg)
-            end
+            if ChatFrame1 and ChatFrame1.AddMessage then ChatFrame1:AddMessage(msg) end
         end
         local function toCenter(msg)
             if UIErrorsFrame and UIErrorsFrame.AddMessage then
@@ -3259,10 +3025,7 @@ local function CreateConfigPanel()
             end
         end
         local ok, err = pcall(function()
-            if not mainFrame then
-                toChat("|cFF00DDDD[LOXX]|r " .. L["POS_NO_FRAME"])
-                return
-            end
+            if not mainFrame then toChat("|cFF00DDDD[LOXX]|r " .. L["POS_NO_FRAME"]); return end
             if LoxxSaveFramePosition(mainFrame) then
                 toChat("|cFF00DDDD[LOXX]|r |cFF44FF44" .. L["POS_SAVED"] .. "|r")
                 toCenter("LOXX: " .. L["POS_SAVED"])
@@ -3270,15 +3033,12 @@ local function CreateConfigPanel()
                 toChat("|cFF00DDDD[LOXX]|r " .. L["POS_HIDDEN"])
             end
         end)
-        if not ok and err then
-            toChat("|cFFFF4444[LOXX]|r Error: " .. tostring(err))
-        end
+        if not ok and err then toChat("|cFFFF4444[LOXX]|r Error: " .. tostring(err)) end
     end)
 
-    -- Run Stats button (gold, like other buttons)
     local statsBtn = CreateFrame("Button", nil, footerButtons, "UIPanelButtonTemplate")
-    statsBtn:SetSize(120, 24)
-    statsBtn:SetPoint("RIGHT", savePosBtn, "LEFT", -10, 0)
+    statsBtn:SetSize(110, 24)
+    statsBtn:SetPoint("RIGHT", savePosBtn, "LEFT", -8, 0)
     statsBtn:SetText(L["BTN_RUN_STATS"])
     if statsBtn.GetFontString and statsBtn:GetFontString() then
         statsBtn:GetFontString():SetTextColor(1, 0.82, 0)
@@ -3287,7 +3047,7 @@ local function CreateConfigPanel()
 
     local commandsBtn = CreateFrame("Button", nil, footerButtons, "UIPanelButtonTemplate")
     commandsBtn:SetSize(110, 24)
-    commandsBtn:SetPoint("RIGHT", statsBtn, "LEFT", -10, 0)
+    commandsBtn:SetPoint("RIGHT", statsBtn, "LEFT", -8, 0)
     commandsBtn:SetText(L["BTN_COMMANDS"])
     commandsBtn:SetScript("OnClick", function()
         local p = "|cFF00DDDD[LOXX]|r "
@@ -3301,8 +3061,8 @@ local function CreateConfigPanel()
     end)
 
     local scoreBtn = CreateFrame("Button", nil, footerButtons, "UIPanelButtonTemplate")
-    scoreBtn:SetSize(110, 24)
-    scoreBtn:SetPoint("RIGHT", commandsBtn, "LEFT", -10, 0)
+    scoreBtn:SetSize(80, 24)
+    scoreBtn:SetPoint("RIGHT", commandsBtn, "LEFT", -8, 0)
     scoreBtn:SetText("Score")
     if scoreBtn.GetFontString and scoreBtn:GetFontString() then
         scoreBtn:GetFontString():SetTextColor(1, 0.82, 0)
@@ -3319,12 +3079,14 @@ local function CreateConfigPanel()
     footerVer:SetJustifyH("RIGHT")
     footerVer:SetText("|cFF888888v" .. LOXX_VERSION .. "|r")
 
+    ActivateTab(1)
     configFrame:Show()
 end
 
 
 ------------------------------------------------------------
--- Create main frame + resize handle (from ADDON_LOADED)
+-- Create main frame
+ + resize handle (from ADDON_LOADED)
 ------------------------------------------------------------
 local function CreateUI()
     mainFrame = CreateFrame("Frame", "LOXXMainFrame", UIParent)
