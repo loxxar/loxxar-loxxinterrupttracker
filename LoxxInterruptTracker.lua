@@ -46,7 +46,7 @@
 
 local ADDON_NAME = "LoxxInterruptTracker"
 local MSG_PREFIX = "LOXX"
-local LOXX_VERSION = "1.5.6.1"
+local LOXX_VERSION = "1.5.6.2"
 local LOXX_DB_VERSION = 4 -- bump when SavedVars schema changes
 local L = LoxxL or {}     -- localization table (set by localization.lua)
 
@@ -4913,22 +4913,32 @@ mobDeathFrame:SetScript("OnEvent", function(_, _, unit)
     activeChannels[unit] = nil
 end)
 
--- CC Tracker: detect party CC casts via UNIT_AURA on mob units.
--- In Midnight 12.0, eSpellID from UNIT_SPELLCAST_SUCCEEDED is a "secret" tainted
--- value — neither table indexing nor == comparison work on it.
--- C_UnitAuras.GetAuraDataByIndex returns a regular (non-tainted) spellId because
--- it is a direct API call, not an event argument.  sourceUnit identifies the caster.
+-- CC Tracker: party CC via UNIT_AURA on mob units (target / focus / boss1–5).
+-- Midnight 12.0 — RÈGLE nameplate: sur nameplate*, GetAuraDataByIndex().spellId est
+-- une valeur SECRÈTE (comme eSpellID party) → CC_SPELLS[spellId] = "table index is secret".
+-- Les frames nameplate n'enregistrent donc pas UNIT_AURA pour le CC (voir plus bas).
+-- Sur target/focus/boss, spellId reste utilisable pour indexer CC_SPELLS.
 local function DetectCCAuras(unit)
     if not (C_UnitAuras and C_UnitAuras.GetAuraDataByIndex) then return end
+    local okSkip, skipNp = pcall(function()
+        return type(unit) == "string" and unit:match("^nameplate%d+$") ~= nil
+    end)
+    if okSkip and skipNp then return end
+
     local i = 1
     while i <= 40 do
         local ok, auraData = pcall(C_UnitAuras.GetAuraDataByIndex, unit, i, "HARMFUL")
         if not ok or not auraData then break end
-        local spellId   = auraData.spellId
-        local ccInfo    = spellId and CC_SPELLS[spellId]
-        if ccInfo and auraData.sourceUnit then
-            local sourceName = UnitName(auraData.sourceUnit)
-            if sourceName and sourceName ~= myName then
+
+        local slotOk, spellId, ccInfo, sourceUnit = pcall(function()
+            local sid = auraData.spellId
+            local info = sid and CC_SPELLS[sid]
+            return sid, info, auraData.sourceUnit
+        end)
+
+        if slotOk and ccInfo and sourceUnit then
+            local okNm, sourceName = pcall(UnitName, sourceUnit)
+            if okNm and sourceName and sourceName ~= myName then
                 local entry = ccAddonUsers[sourceName]
                 if entry then
                     local ccCd   = ccInfo.cd or 2
@@ -4939,7 +4949,7 @@ local function DetectCCAuras(unit)
                         entry.spellName = ccInfo.name
                         ccDirty = true
                         DLog("CC_AURA", sourceName .. " " .. ccInfo.name
-                            .. " cd=" .. ccCd .. " via " .. unit)
+                            .. " cd=" .. ccCd .. " via " .. tostring(unit))
                         if spyMode then
                             print("|cFF00DDDD[SPY]|r CC_AURA " .. sourceName
                                 .. " → " .. ccInfo.name
@@ -4972,7 +4982,7 @@ for i = 1, 40 do
     nameplateCastFrames[unit]:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", unit)
     nameplateCastFrames[unit]:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", unit)
     nameplateCastFrames[unit]:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", unit)
-    nameplateCastFrames[unit]:RegisterUnitEvent("UNIT_AURA", unit)
+    -- Pas de UNIT_AURA ici : Midnight 12.0 — spellId depuis nameplate* est secret (crash CC_SPELLS).
     nameplateCastFrames[unit]:SetScript("OnEvent", function(_, event, eUnit)
         if event == "UNIT_SPELLCAST_INTERRUPTED" then
             OnMobInterrupted(eUnit)
@@ -4980,8 +4990,6 @@ for i = 1, 40 do
             OnMobChannelStart(eUnit)
         elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" then
             OnMobChannelStop(eUnit)
-        elseif event == "UNIT_AURA" then
-            DetectCCAuras(eUnit)
         end
     end)
 end
