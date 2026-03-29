@@ -2656,7 +2656,7 @@ local function CreateConfigPanel()
     end
 
     local FW   = 520
-    local FH   = 630
+    local FH   = 830
     local HDR  = 86
     local TABH = 28
     local FOOT = 70
@@ -3145,7 +3145,7 @@ local function CreateConfigPanel()
     local footerMsg = footerBand:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     footerMsg:SetPoint("BOTTOMLEFT", footerBand, "BOTTOMLEFT", 14, 10)
     footerMsg:SetJustifyH("LEFT")
-    footerMsg:SetText("Thanks to my favorite haters who pushed me to continue this addon  #FUALL")
+    footerMsg:SetText("Thanks to my favorite haters who pushed me to continue this addon  #FUWITHLOVE")
 
     local footerVer = footerBand:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     footerVer:SetPoint("BOTTOMRIGHT", footerBand, "BOTTOMRIGHT", -14, 10)
